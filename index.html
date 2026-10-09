@@ -1344,7 +1344,7 @@ function hapticTest() {              // runs inside a tap; reports what actually
   const allowed = !(known && !pol.allowsFeature('vibrate'));
   if (EMBEDDED || !allowed) return 'Diese Ansicht ist eingebettet (zum Beispiel im Claude-Artifact). Chrome blockiert dort die Vibration. Öffne die HTML-Datei direkt: Dateien-App → chromaflux.html → Öffnen mit Chrome.';
   if (!ok) return 'Chrome hat die Vibration abgelehnt. Tippe einmal auf die Seite und versuche es erneut.';
-  return 'Signal gesendet: zweimal 0,3 Sekunden. Nichts gespürt? Prüfe in den Android-Einstellungen Vibration und Haptik, den Energiesparmodus und „Bitte nicht stören".';
+  return 'Signal gesendet: zweimal 0,3 Sekunden. Nichts gespürt? Dann bremst meist das Handy selbst: Lautlos-Modus (Klingelton auf Vibration stellen statt lautlos), „Bitte nicht stören", Energiesparmodus oder „Vibration und Haptik" in den Einstellungen.';
 }
 function liveHaptics(t0, t1) {
   for (const q of CUES) {
@@ -1510,7 +1510,7 @@ function toggleFull() {
 // differences move. So tilt and inertia act on the dye density: heavy colour slides downhill,
 // falls in Rayleigh–Taylor fingers when the phone is turned over, and lags behind a shake.
 const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-const Hold = { on: false, got: false, g: [0, -1], lin: [0, 0], spin: 0, lp: null, shakeT: 0, tiltRate: 0, gPrev: [0, -1], sim: [0, -0.85], pourAt: -1 };
+const Hold = { on: false, got: false, g: [0, -1], lin: [0, 0], spin: 0, lp: null, shakeT: 0, tiltRate: 0, gPrev: [0, -1], sim: [0, -0.85], pourAt: -1, hapT: 0, peak: 0 };
 const HOLD_G = 0.9;             // pull on heavy dye, height units / s² per unit density
 const bHold = document.getElementById('bHold'), levelEl = document.getElementById('level'), levelDot = levelEl.firstElementChild;
 const hintEl = document.getElementById('hint'), hintFree = hintEl.innerHTML, toastEl = document.getElementById('toast');
@@ -1560,13 +1560,22 @@ function holdUpdate(dt, t) {
   sim.swirl = clamp(-Hold.spin * 0.9, -3, 3);                // turning the phone leaves the liquid behind
   sim.vort = 5; sim.velDiss = 0.55; sim.dyeDiss = 0.03; sim.noise = 0.01; sim.shear = 0;
   Hold.shakeT -= dt;
-  if (Hold.got && Hold.shakeT <= 0 && Math.hypot(Hold.lin[0], Hold.lin[1]) > 13) {
+  if (Hold.got && Hold.shakeT <= 0 && Math.hypot(Hold.lin[0], Hold.lin[1]) > 11) {
     Hold.shakeT = 0.7; const q = at(0.5, 0.5, 0.12 * freeRng(), freeRng() * TAU); userBurst(q[0], q[1], true);
   }
   if (Hold.pourAt >= 0 && t >= Hold.pourAt) { Hold.pourAt = -1; pourGlass(); }
   const dg = Math.hypot(g[0] - Hold.gPrev[0], g[1] - Hold.gPrev[1]) / Math.max(dt, 1e-3);
   Hold.gPrev[0] = g[0]; Hold.gPrev[1] = g[1];
   Hold.tiltRate += (dg - Hold.tiltRate) * Math.min(1, dt * 6);
+  // feel the glass: sloshing pulses quicken with the tilt, a hard stop lands as a thump against the wall
+  const tr = Hold.tiltRate, sp = Math.abs(Hold.spin);
+  Hold.hapT -= dt;
+  Hold.peak = tr > Hold.peak ? tr : Hold.peak * Math.exp(-dt / 0.5);
+  if (Hold.peak > 2.5 && tr < 0.6) { Haptics.play([70, 40, 35]); Hold.peak = 0; Hold.hapT = 0.25; }
+  else if (Hold.hapT <= 0 && (tr > 1.2 || sp > 2)) {
+    const k = Math.min(1, Math.max(tr / 5, sp / 6));
+    Haptics.play([Math.round(28 + 40 * k)]); Hold.hapT = 0.42 - 0.27 * k;
+  }
   if (dragVoice && soundOn) {     // the glide tone sings the tilt: pitch = direction, loudness = movement
     const now = audio.ctx.currentTime, sc = PAL[targetPal].scale;
     const u = (Math.atan2(g[1], g[0]) + Math.PI) / TAU;
@@ -1608,7 +1617,7 @@ async function enterHold() {
       }
     }
   } catch (_) {}
-  Object.assign(Hold, { on: true, got: false, g: [0, -1], lin: [0, 0], spin: 0, lp: null, shakeT: 0.8, tiltRate: 0, gPrev: [0, -1], sim: [0, -0.85] });
+  Object.assign(Hold, { on: true, got: false, g: [0, -1], lin: [0, 0], spin: 0, lp: null, shakeT: 0.8, tiltRate: 0, gPrev: [0, -1], sim: [0, -0.85], hapT: 0, peak: 0 });
   if (autopilot) setAutopilot(false);
   pointers.clear(); JETS.length = 0; BLASTS.length = 0;
   D.clearUntil = simT + 0.35; Hold.pourAt = simT + 0.4;      // empty the glass, then pour fresh colour
