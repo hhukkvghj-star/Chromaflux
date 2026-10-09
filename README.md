@@ -36,12 +36,31 @@ Höhepunkt, kurze Impulse bei den Tintentropfen und feines Ticken beim Rühren.
 
 Der Vibrations-Button erscheint nur, wenn das Gerät Haptik unterstützt.
 
+## Freies Spiel: Farbe ins Glas
+
+Schaltest du den Autopiloten aus (Kreis-Knopf mit ▶, Taste `A`), wird der Bildschirm zum Glas Wasser,
+und die Farbe bringst du selbst hinein:
+
+- **Tippen** setzt einen Tropfen – mit Plopp und kurzem Tipp-Vibrieren, jeder Tropfen in der nächsten
+  Farbe der Palette. Schwere Farben sinken als Pilzwolke ab, leichte steigen auf, ohne Auftrieb blüht
+  der Tropfen an Ort und Stelle auf.
+- **Lange drücken** gießt: Die Pipette tropft, solange der Finger liegt. Ziehst du dabei weiter, legst
+  du eine Farbspur.
+- **Ziehen** rührt nur. Es kommt keine neue Farbe dazu, die vorhandene wird verwirbelt.
+- **Schütteln** (oder `Leertaste` bzw. ⚡) zündet eine Farbexplosion.
+- Die Flüssigkeit bleibt im Glas und verblasst nur langsam. Milchig verrührte Stellen klären sich
+  zuerst, damit das Glas nicht zu Weißbrei wird.
+- Die Kapitel-Knöpfe `1`–`5` leeren das Glas und füllen es mit der neuen Palette.
+
+Der Demo-Film (Autopilot) bleibt, wie er ist: Dort malt der Finger Licht, und Tippen zündet eine
+Explosion.
+
 ## Halte-Modus: das Handy als Glas
 
 Mit **„Halten"** (unten rechts, Taste `G`) oder **„Im Halte-Modus starten"** auf dem Startbildschirm
-steuerst du die Flüssigkeit nur noch über die Lage des Handys. Der Finger rührt dann nicht mehr,
-Antippen blendet nur die Bedienung ein. Beim Aktivieren wird das Glas mit frischer Farbe gefüllt,
-die kaum noch verblasst.
+steuerst du die Flüssigkeit über die Lage des Handys. Der Finger rührt dann nicht mehr, aber Tippen
+setzt weiter Tropfen und langes Drücken gießt – die Farbe fällt dann in Richtung der echten Schwerkraft. Beim
+Aktivieren wird das Glas mit frischer Farbe gefüllt, die kaum noch verblasst.
 
 - **Neigen:** Die Farbe ist schwerer als das Wasser und fließt bergab zum tiefsten Rand.
   Auf den Kopf gedreht fällt sie in Pilzfingern herunter (Rayleigh-Taylor-Instabilität),
@@ -93,8 +112,10 @@ geheimer Schlüssel nötig.
 | Eingabe | Wirkung |
 | --- | --- |
 | Tippen / `Enter` auf dem Startbildschirm | Film mit Ton starten |
-| Ziehen (Maus/Finger) | Flüssigkeit umrühren, Farbe einbringen |
-| Tippen / Klick | Farbexplosion mit Lichtblitz |
+| Ziehen (Maus/Finger) | Demo: Licht malen und rühren · freies Spiel: nur rühren |
+| Tippen / Klick | Demo: Farbexplosion mit Lichtblitz · freies Spiel und Halte-Modus: Tropfen setzen |
+| Lange drücken (Finger/Maus) | freies Spiel und Halte-Modus: Farbe gießen |
+| Handy schütteln | freies Spiel und Halte-Modus: Farbexplosion |
 | `Leertaste` | großer Flash in der Bildmitte |
 | `1`–`5` | zu einem Kapitel springen |
 | `A` | Autopilot (Regie) an/aus – aus = freies Spiel mit der gewählten Palette |

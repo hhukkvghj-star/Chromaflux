@@ -192,7 +192,7 @@ const RKEYS = ['ink', 'metal', 'irid', 'spec', 'bloom', 'thr', 'rays', 'streak',
 const VKEYS = ['bgTop', 'bgBot', 'accent'];
 PAL.forEach(p => { p.colors = p.hex.map(lin); VKEYS.forEach(k => { p.r[k] = lin(p.r[k]); }); });
 
-const SIM_BASE = { vort: 8, gx: 0, buoy: 0, shear: 0, shearW: 0.07, shearRate: 1.0, swirl: 0, velDiss: 0.35, dyeDiss: 0.3, maxV: 3.0, noise: 0.06, noiseS: 1.6 };
+const SIM_BASE = { vort: 8, gx: 0, buoy: 0, shear: 0, shearW: 0.07, shearRate: 1.0, swirl: 0, velDiss: 0.35, dyeDiss: 0.3, maxV: 3.0, noise: 0.06, noiseS: 1.6, sat: 0, satK: 1.5, milk: 0, wall: 0, presK: 0.8 };
 const sim = Object.assign({}, SIM_BASE);
 const RP = {};
 let targetPal = 0, palTau = 0.6;
@@ -268,6 +268,16 @@ vec2 blast(vec2 uv){
     acc += d * (uBlast[i].w / sqrt(uBlast[i].z)) * exp(-dot(d, d) / uBlast[i].z) * 2.33;
   }
   return acc;
+}
+`;
+const WL = `
+uniform float uWall;
+vec2 wallv(vec2 uv, vec2 v){          // glass play: dye comes to rest at the walls instead of draining through them
+  if (uWall <= 0.0) return v;
+  float ar = 1.0 / uVS.x;
+  v.x *= smoothstep(0.0, uWall, v.x < 0.0 ? uv.x * ar : (1.0 - uv.x) * ar);
+  v.y *= smoothstep(0.0, uWall, v.y < 0.0 ? uv.y : 1.0 - uv.y);
+  return v;
 }
 `;
 FS.copy = HDR + NB + `uniform sampler2D uSrc; uniform float uK; void main(){ o = texture(uSrc, vUv) * uK; }`;
@@ -359,17 +369,17 @@ void main(){
 }`;
 
 FS.advect = HDR + NB + `
-uniform sampler2D uVel; uniform sampler2D uSrc; uniform float uDt, uDiss; uniform vec2 uVS;` + BL + `
+uniform sampler2D uVel; uniform sampler2D uSrc; uniform float uDt, uDiss; uniform vec2 uVS;` + BL + WL + `
 void main(){
-  vec2 c = vUv - uDt * (texture(uVel, vUv).xy + blast(vUv)) * uVS;
+  vec2 c = vUv - uDt * wallv(vUv, texture(uVel, vUv).xy + blast(vUv)) * uVS;
   o = texture(uSrc, c) / (1.0 + uDiss * uDt);
 }`;
 
 FS.mac = HDR + NB + `
 uniform sampler2D uVel; uniform sampler2D uSrc; uniform sampler2D uHat;
-uniform float uDt, uDiss; uniform vec2 uVS; uniform vec2 uSize; uniform vec4 uMax;` + BL + `
+uniform float uDt, uDiss; uniform vec2 uVS; uniform vec2 uSize; uniform vec4 uMax; uniform vec3 uSat;` + BL + WL + `
 void main(){
-  vec2 v = (texture(uVel, vUv).xy + blast(vUv)) * uVS * uDt;
+  vec2 v = wallv(vUv, texture(uVel, vUv).xy + blast(vUv)) * uVS * uDt;
   vec2 back = vUv - v;
   vec4 hat = texture(uHat, vUv);
   vec4 bar = texture(uHat, vUv + v);
@@ -381,7 +391,11 @@ void main(){
   vec4 c = texelFetch(uSrc, clamp(i0 + ivec2(0, 1), ivec2(0), mx), 0);
   vec4 d = texelFetch(uSrc, clamp(i0 + ivec2(1, 1), ivec2(0), mx), 0);
   r = clamp(r, min(min(a, b), min(c, d)), max(max(a, b), max(c, d)));
-  o = min(max(r, vec4(0.0)) / (1.0 + uDiss * uDt), uMax);
+  r = max(r, vec4(0.0));
+  // a glass never silts up: dense colour above the knee settles back, and milky (desaturated) mixes clear first
+  float hi = max(max(r.r, r.g), r.b), lo = min(min(r.r, r.g), r.b);
+  float extra = uSat.x * max(hi - uSat.y, 0.0) + uSat.z * smoothstep(0.35, 0.8, lo / max(hi, 1e-4)) * smoothstep(0.02, 0.2, hi);
+  o = min(r / (1.0 + (uDiss + extra) * uDt), uMax);
 }`;
 
 FS.pupdate = HDR + `out vec4 o;
@@ -802,7 +816,7 @@ function step(dt, time) {
   f1(p, 'uNoise', sim.noise); f1(p, 'uNoiseS', sim.noiseS); f1(p, 'uTime', time);
   blit(vel.write); vel.swap();
   p = P.div.use(); f2(p, 'uTexel', vel.tx, vel.ty); tex(p, 'uVel', 0, vel.read); blit(divg);
-  p = P.copy.use(); f2(p, 'uTexel', vel.tx, vel.ty); tex(p, 'uSrc', 0, pres.read); f1(p, 'uK', 0.8); blit(pres.write); pres.swap();
+  p = P.copy.use(); f2(p, 'uTexel', vel.tx, vel.ty); tex(p, 'uSrc', 0, pres.read); f1(p, 'uK', sim.presK); blit(pres.write); pres.swap();
   p = P.jacobi.use(); f2(p, 'uTexel', vel.tx, vel.ty); tex(p, 'uDiv', 1, divg);
   for (let i = 0; i < ITERS; i++) { tex(p, 'uP', 0, pres.read); blit(pres.write); pres.swap(); }
   p = P.grad.use(); f2(p, 'uTexel', vel.tx, vel.ty); tex(p, 'uP', 0, pres.read); tex(p, 'uVel', 1, vel.read); blit(vel.write); vel.swap();
@@ -814,12 +828,12 @@ function step(dt, time) {
     if (nb < 4) { BL_ARR.set([b.x, b.y, b.r * b.r, b.s * k], nb * 4); nb++; }
   }
   p = P.advect.use(); f2(p, 'uTexel', vel.tx, vel.ty); tex(p, 'uVel', 0, vel.read); tex(p, 'uSrc', 1, vel.read);
-  f1(p, 'uDt', dt); f1(p, 'uDiss', sim.velDiss); f2(p, 'uVS', 1 / ar, 1); i1(p, 'uBlastN', 0); blit(vel.write); vel.swap();
+  f1(p, 'uDt', dt); f1(p, 'uDiss', sim.velDiss); f2(p, 'uVS', 1 / ar, 1); i1(p, 'uBlastN', 0); f1(p, 'uWall', 0); blit(vel.write); vel.swap();
   // dye: MacCormack (forward pass, then corrected pass)
   p = P.advect.use(); f2(p, 'uTexel', dye.tx, dye.ty); tex(p, 'uVel', 0, vel.read); tex(p, 'uSrc', 1, dye.read);
-  f1(p, 'uDt', dt); f1(p, 'uDiss', 0); f2(p, 'uVS', 1 / ar, 1); setBlast(p, nb, ar); blit(dyeHat);
+  f1(p, 'uDt', dt); f1(p, 'uDiss', 0); f2(p, 'uVS', 1 / ar, 1); f1(p, 'uWall', sim.wall); setBlast(p, nb, ar); blit(dyeHat);
   p = P.mac.use(); f2(p, 'uTexel', dye.tx, dye.ty); tex(p, 'uVel', 0, vel.read); tex(p, 'uSrc', 1, dye.read); tex(p, 'uHat', 2, dyeHat);
-  f1(p, 'uDt', dt); f1(p, 'uDiss', sim.dyeDiss); f2(p, 'uVS', 1 / ar, 1); f2(p, 'uSize', dye.w, dye.h); f4(p, 'uMax', 14, 14, 14, 6); setBlast(p, nb, ar);
+  f1(p, 'uDt', dt); f1(p, 'uDiss', sim.dyeDiss); f2(p, 'uVS', 1 / ar, 1); f2(p, 'uSize', dye.w, dye.h); f4(p, 'uMax', 14, 14, 14, 6); f3(p, 'uSat', sim.sat, sim.satK, sim.milk); f1(p, 'uWall', sim.wall); setBlast(p, nb, ar);
   blit(dye.write); dye.swap();
   if (pstate && RP.part > 0.01) {
     p = P.pupdate.use(); tex(p, 'uState', 0, pstate.read); tex(p, 'uVel', 1, vel.read);
@@ -1389,12 +1403,12 @@ async function renderAudio(dur, raw) {
 /* ================================================================
    INTERACTION
    ================================================================ */
-let autopilot = true, paused = false, simT = 4.0, lastCueT = 4.0, idleT = 0, sprinkleT = 2, colorIdx = 0;
+let autopilot = true, paused = false, simT = 4.0, lastCueT = 4.0, colorIdx = 0;
 const freeRng = mulberry32(Date.now() & 0xffff);
 const pointers = new Map();
 function toUv(e) { const r = canvas.getBoundingClientRect(); return toSim((e.clientX - r.left) / r.width, 1 - (e.clientY - r.top) / r.height); }
 function wake() {
-  idleT = 0; document.body.classList.remove('idle');
+  document.body.classList.remove('idle');
   clearTimeout(wake.tm); wake.tm = setTimeout(() => document.body.classList.add('idle'), COARSE ? 4500 : 3200);
 }
 function palColors() { return PAL[targetPal].colors; }
@@ -1404,11 +1418,43 @@ function userBurst(x, y, big) {
   Haptics.play(HAPTIC.impact(big ? 0.9 : 0.4), big ? 235 : 165);
   if (audio && soundOn) { const n = audio.ctx.currentTime + 0.01; audio.impact(n, big ? 0.9 : 0.5); const sc = PAL[targetPal].scale; audio.cascade(n, sc.slice(0, big ? sc.length : 4)); }
 }
+// Demo (autopilot): the finger paints light and a tap detonates, as always.
+// Glass play (free play and hold mode): a tap drops liquid in, a resting finger pours,
+// dragging only stirs what is already there, and shaking the phone detonates.
+let dropIdx = 0;
+function nextDropColor() { const c = palColors(); return c[dropIdx++ % c.length]; }
+function glassFlow() {            // where fresh liquid travels: with gravity, with the palette's buoyancy, or nowhere (seen from above)
+  if (Hold.on) { const g = holdGravity(), m = Math.hypot(g[0], g[1]); return m > 0.25 ? [g[0] / m, g[1] / m] : null; }
+  const b = PAL[targetPal].sim.buoy || 0;
+  return Math.abs(b) > 0.05 ? [0, Math.sign(b)] : null;
+}
+function dropAt(x, y) {
+  const col = nextDropColor(), f = glassFlow();
+  dsplat(x, y, col, RP.ink > 0.5 ? 2.4 : 1.5, 0.026);
+  if (f) vsplat(x, y, f[0] * 0.55, f[1] * 0.55, 0.03);            // falls in and curls into a mushroom
+  else burst(x, y, 7, [col], 0.3, { rng: freeRng, life: 0.3, amt: 1.4, blast: 0.06, blastR: 0.05, ring: 0.008, jetR: 0.01, curl: 0.8 });   // lands and blooms
+  Haptics.play([30], 130);
+  if (audio && soundOn) audio.plop(audio.ctx.currentTime + 0.005, 0.9, clamp(x * 2 - 1, -1, 1));
+}
+function pourStep(s, dt) {        // a pipette held still keeps dripping
+  const f = glassFlow();
+  dsplat(s.x, s.y, s.col, (RP.ink > 0.5 ? 2.6 : 1.7) * dt, 0.018);
+  if (f) nsplat(s.x, s.y, f[0] * 0.35, f[1] * 0.35, 0.024, clamp(dt * 8, 0, 1));
+  if ((s.dripT -= dt) <= 0) {
+    s.dripT = 0.17; Haptics.play([18], 80);
+    if (audio && soundOn) audio.plop(audio.ctx.currentTime + 0.005, 0.45, clamp(s.x * 2 - 1, -1, 1));
+  }
+}
+let motionAsked = false;
+function askMotionOnce() {        // iOS only hands out motion data after a tap asked for it (shaking needs it)
+  if (motionAsked || typeof DeviceMotionEvent === 'undefined' || typeof DeviceMotionEvent.requestPermission !== 'function') return;
+  motionAsked = true; DeviceMotionEvent.requestPermission().catch(() => { motionAsked = false; });   // no gesture yet: ask again next tap
+}
 canvas.addEventListener('pointerdown', e => {
-  wake(); if (Hold.on) return;
+  wake(); if (!autopilot) askMotionOnce();
   try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
   const p = toUv(e);
-  pointers.set(e.pointerId, { x: p[0], y: p[1], px: p[0], py: p[1], t0: performance.now(), cx: e.clientX, cy: e.clientY, moved: 0, ci: colorIdx++, bellT: 0, hapT: 0 });
+  pointers.set(e.pointerId, { x: p[0], y: p[1], px: p[0], py: p[1], t0: performance.now(), cx: e.clientX, cy: e.clientY, moved: 0, ci: colorIdx++, bellT: 0, hapT: 0, pour: false, dripT: 0, col: null });
 });
 canvas.addEventListener('pointermove', e => {
   wake();
@@ -1418,7 +1464,9 @@ canvas.addEventListener('pointermove', e => {
 });
 function endPointer(e) {
   const s = pointers.get(e.pointerId); if (!s) return;
-  if (s.moved < 8 && performance.now() - s.t0 < 320) userBurst(s.x, s.y, false);
+  const held = performance.now() - s.t0;
+  if (autopilot) { if (s.moved < 8 && held < 320) userBurst(s.x, s.y, false); }
+  else { askMotionOnce(); if (!s.pour && s.moved < 10) dropAt(s.x, s.y); }   // released before the pour began: a single drop
   pointers.delete(e.pointerId);
 }
 canvas.addEventListener('pointerup', endPointer);
@@ -1430,14 +1478,18 @@ function applyPointers(dt, t) {
   const ar = AR();
   pointers.forEach(s => {
     const dx = s.x - s.px, dy = s.y - s.py, dist = Math.hypot(dx * ar, dy);
-    if (dist > 1e-5) {
+    if (!autopilot && !s.pour && s.moved < 10 && performance.now() - s.t0 > 300) { s.pour = true; s.col = nextDropColor(); }
+    if (s.pour) pourStep(s, dt);
+    if (dist > 1e-5 && (autopilot || !Hold.on)) {              // in hold mode only the tilt moves the liquid
       const k = 0.55 / Math.max(dt, 1 / 240);
       const vx = clamp(dx * ar * k, -3, 3), vy = clamp(dy * k, -3, 3);
       const r = COARSE ? 0.05 : 0.035;
       vsplat(s.x, s.y, vx, vy, r);
-      const cols = palColors();
-      const col = mixc(cols[s.ci % cols.length], cols[(s.ci + 1) % cols.length], 0.5 + 0.5 * Math.sin(t * 0.9));
-      dsplat(s.x, s.y, col, clamp(dist * 45, 0.15, RP.ink > 0.5 ? 1.6 : 2.4), r * 0.75);
+      if (autopilot) {            // the demo paints light; glass play only stirs what is there
+        const cols = palColors();
+        const col = mixc(cols[s.ci % cols.length], cols[(s.ci + 1) % cols.length], 0.5 + 0.5 * Math.sin(t * 0.9));
+        dsplat(s.x, s.y, col, clamp(dist * 45, 0.15, RP.ink > 0.5 ? 1.6 : 2.4), r * 0.75);
+      }
       speedSum += dist / Math.max(dt, 1e-3);
       if ((s.hapT -= dt) <= 0 && dist > 0.004) { s.hapT = 0.14; Haptics.play(HAPTIC.tick(), 70); }
       if (audio && soundOn && (s.bellT -= dt) <= 0 && dist > 0.004) {
@@ -1459,23 +1511,21 @@ function applyPointers(dt, t) {
 
 function freeUpdate(dt, t) {
   Object.assign(sim, SIM_BASE, PAL[targetPal].sim);
+  sim.dyeDiss = 0.045; sim.velDiss = Math.max(sim.velDiss, 0.45);   // a glass: the liquid stays until you change it
+  sim.sat = 0.5; sim.milk = 0.45;                                     // …but never boils over or silts up into milk
+  sim.wall = 0.05; sim.presK = 0.995;                                 // what sinks pools on the bottom, held up by remembered pressure
   updateJets(dt);
   FX.white = 0; FX.title = 0; FX.fade = 1;
   if (Hold.on) holdUpdate(dt, t);
+  shakeCheck(dt);
+  if (Hold.pourAt >= 0 && t >= Hold.pourAt) { Hold.pourAt = -1; pourGlass(); }
   if (t < D.clearUntil) { sim.dyeDiss = 4; sim.velDiss = 2; }
-  idleT += dt;
-  if (!Hold.on && idleT > 4 && (sprinkleT -= dt) <= 0) {
-    sprinkleT = 1.2 + freeRng() * 1.4;
-    const x = 0.2 + 0.6 * freeRng(), y = 0.2 + 0.6 * freeRng(), a = freeRng() * TAU;
-    vsplat(x, y, Math.cos(a) * 0.5, Math.sin(a) * 0.5, 0.04);
-    dsplat(x, y, palColors()[Math.floor(freeRng() * palColors().length)], 2.0, 0.02);
-  }
 }
 
 function jumpChapter(i) {
   const ch = CHAPTERS[i];
   JETS.length = 0; BLASTS.length = 0;
-  if (Hold.on) {
+  if (!autopilot) {
     setPal(ch.pal, 0.45); D.clearUntil = simT + 0.35; Hold.pourAt = simT + 0.4;
     flash(0.5, 0.5, 0.35, mixc(PAL[ch.pal].colors[0], [1, 1, 1], 0.5)); Haptics.play(HAPTIC.jump());
     if (audio && soundOn) syncScore(simT);
@@ -1492,9 +1542,13 @@ function jumpChapter(i) {
   if (audio && soundOn) { audio.impact(audio.ctx.currentTime + 0.01, 0.45); syncScore(simT); }
   updateHud(true);
 }
-function setAutopilot(on) {
+function setAutopilot(on, quiet) {
   if (on && Hold.on) exitHold();
   autopilot = on;
+  listenMotion(!on); pointers.clear();
+  hintEl.innerHTML = on ? HINT_DEMO : Hold.on ? HINT_HOLD : HINT_GLASS;
+  if (!on) askMotionOnce();
+  if (!on && !quiet) toast('Freies Spiel: Tippen setzt einen Tropfen, lange drücken gießt, Ziehen rührt, Schütteln zündet eine Explosion.', 5200);
   const b = document.getElementById('bAuto'); b.setAttribute('aria-pressed', on ? 'true' : 'false');
   if (on) { dirSeek(simT); lastCueT = simT; }
   if (audio && soundOn) syncScore(simT);
@@ -1520,7 +1574,10 @@ const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform ==
 const Hold = { on: false, got: false, g: [0, -1], lin: [0, 0], spin: 0, lp: null, shakeT: 0, tiltRate: 0, gPrev: [0, -1], sim: [0, -0.85], pourAt: -1, hapT: 0, peak: 0 };
 const HOLD_G = 0.9;             // pull on heavy dye, height units / s² per unit density
 const bHold = document.getElementById('bHold'), levelEl = document.getElementById('level'), levelDot = levelEl.firstElementChild;
-const hintEl = document.getElementById('hint'), hintFree = hintEl.innerHTML, toastEl = document.getElementById('toast');
+const hintEl = document.getElementById('hint'), toastEl = document.getElementById('toast');
+const HINT_DEMO = hintEl.innerHTML;
+const HINT_GLASS = '<b>Tippen</b> Tropfen · <b>Lange drücken</b> gießen · <b>Ziehen</b> rühren · <b>Schütteln</b>/<b>Leertaste</b> Explosion · <b>1–5</b> Farben';
+const HINT_HOLD = '<b>Neigen</b> fließen · <b>Tippen</b> Tropfen · <b>Lange drücken</b> gießen · <b>Schütteln</b> Explosion · <b>Drehen</b> Strudel · <b>Pfeiltasten</b> neigen ohne Sensor · <b>G</b> beenden';
 function toast(msg, ms) {
   ms = ms || 4000; toastEl.textContent = msg; toastEl.hidden = false; toastEl.classList.remove('fade');
   clearTimeout(toast.a); clearTimeout(toast.b);
@@ -1548,16 +1605,24 @@ function onMotion(e) {
   if (rr && rr.alpha != null) Hold.spin += (rr.alpha * Math.PI / 180 - Hold.spin) * 0.3;
 }
 function holdGravity() { return Hold.got ? Hold.g : Hold.sim; }
-function pourGlass() {           // fill the upper half of the glass; gravity does the rest
-  const cols = palColors(), ar = AR(), g = holdGravity();
-  let gx = g[0], gy = g[1]; const m = Math.hypot(gx, gy);
-  if (m < 0.25) { gx = 0; gy = -1; } else { gx /= m; gy /= m; }
+function pourGlass() {           // refill upstream of the flow (gravity does the rest), or anywhere when seen from above
+  const cols = palColors(), ar = AR(), f = glassFlow();
   let placed = 0;
   for (let i = 0; i < 80 && placed < 6; i++) {
     const x = 0.12 + 0.76 * freeRng(), y = 0.12 + 0.76 * freeRng();
-    if ((x - 0.5) * ar * -gx + (y - 0.5) * -gy < 0.04) continue;     // only above the "waterline"
+    if (f && (x - 0.5) * ar * -f[0] + (y - 0.5) * -f[1] < 0.04) continue;   // only above the "waterline"
     dsplat(x, y, cols[placed % cols.length], 1.5, 0.05); placed++;
   }
+}
+function shakeCheck(dt) {         // a hard shake detonates, in free play and in hold mode
+  Hold.shakeT -= dt;
+  if (Hold.got && Hold.shakeT <= 0 && Math.hypot(Hold.lin[0], Hold.lin[1]) > 11) {
+    Hold.shakeT = 0.7; const q = at(0.5, 0.5, 0.12 * freeRng(), freeRng() * TAU); userBurst(q[0], q[1], true);
+  }
+}
+function listenMotion(on) {
+  if (on) window.addEventListener('devicemotion', onMotion);
+  else { window.removeEventListener('devicemotion', onMotion); Hold.got = false; }
 }
 function holdUpdate(dt, t) {
   const g = holdGravity();
@@ -1566,11 +1631,6 @@ function holdUpdate(dt, t) {
   sim.buoy = (g[1] - 0.6 * Hold.lin[1] / 9.81) * HOLD_G;
   sim.swirl = clamp(-Hold.spin * 0.9, -3, 3);                // turning the phone leaves the liquid behind
   sim.vort = 5; sim.velDiss = 0.55; sim.dyeDiss = 0.03; sim.noise = 0.01; sim.shear = 0;
-  Hold.shakeT -= dt;
-  if (Hold.got && Hold.shakeT <= 0 && Math.hypot(Hold.lin[0], Hold.lin[1]) > 11) {
-    Hold.shakeT = 0.7; const q = at(0.5, 0.5, 0.12 * freeRng(), freeRng() * TAU); userBurst(q[0], q[1], true);
-  }
-  if (Hold.pourAt >= 0 && t >= Hold.pourAt) { Hold.pourAt = -1; pourGlass(); }
   const dg = Math.hypot(g[0] - Hold.gPrev[0], g[1] - Hold.gPrev[1]) / Math.max(dt, 1e-3);
   Hold.gPrev[0] = g[0]; Hold.gPrev[1] = g[1];
   Hold.tiltRate += (dg - Hold.tiltRate) * Math.min(1, dt * 6);
@@ -1626,21 +1686,21 @@ async function enterHold() {
     }
   } catch (_) {}
   Object.assign(Hold, { on: true, got: false, g: [0, -1], lin: [0, 0], spin: 0, lp: null, shakeT: 0.8, tiltRate: 0, gPrev: [0, -1], sim: [0, -0.85], hapT: 0, peak: 0 });
-  if (autopilot) setAutopilot(false);
+  if (autopilot) setAutopilot(false, true);
   pointers.clear(); JETS.length = 0; BLASTS.length = 0;
   D.clearUntil = simT + 0.35; Hold.pourAt = simT + 0.4;      // empty the glass, then pour fresh colour
-  window.addEventListener('devicemotion', onMotion);
   document.body.classList.add('hold'); bHold.setAttribute('aria-pressed', 'true'); levelEl.hidden = false;
-  hintEl.innerHTML = '<b>Neigen</b> fließen · <b>Schütteln</b> Explosion · <b>Drehen</b> Strudel · <b>Pfeiltasten</b> neigen ohne Sensor · <b>G</b> beenden';
+  hintEl.innerHTML = HINT_HOLD;
   flash(0.5, 0.5, 0.35, mixc(palColors()[0], [1, 1, 1], 0.5)); Haptics.play(HAPTIC.jump());
-  toast('Halte das Handy wie ein Glas: Neigen lässt die Farben fließen, Schütteln zündet sie, Drehen rührt einen Strudel.', 5200);
+  toast('Halte das Handy wie ein Glas: Neigen lässt die Farben fließen, Tippen setzt Tropfen, Schütteln zündet sie, Drehen rührt einen Strudel.', 5200);
   setTimeout(holdDiagnose, 1600);
   wake(); updateHud(true);
 }
 function exitHold() {
   if (!Hold.on) return;
-  Hold.on = false; window.removeEventListener('devicemotion', onMotion);
-  document.body.classList.remove('hold'); bHold.setAttribute('aria-pressed', 'false'); levelEl.hidden = true; hintEl.innerHTML = hintFree;
+  Hold.on = false;
+  document.body.classList.remove('hold'); bHold.setAttribute('aria-pressed', 'false'); levelEl.hidden = true;
+  hintEl.innerHTML = autopilot ? HINT_DEMO : HINT_GLASS;
   try { if (NATIVE) NATIVE.lockOrientation(false); else if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch (_) {}
   if (dragVoice && soundOn) dragVoice.gain.gain.setTargetAtTime(0, audio.ctx.currentTime, 0.1);
   updateHud(true);
