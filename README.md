@@ -6,7 +6,7 @@ Eine Studie in flüssigem Licht: eine echte Fluidsimulation in WebGL2, die
 Farben und Formen ineinanderfließen lässt – interaktiv im Browser und als
 fertig choreografiertes 1080p-Video mit eigenem Soundtrack.
 
-**Live:** https://hhukkvghj-star.github.io/chromaflux/ – am Handy in Chrome öffnen, dann funktionieren
+**Live:** https://hhukkvghj-star.github.io/Chromaflux/ – am Handy in Chrome öffnen, dann funktionieren
 auch Vibration und Halte-Modus (beides braucht eine echte https-Seite).
 
 - **`index.html`** – die interaktive Version. Einfach im Browser öffnen,
