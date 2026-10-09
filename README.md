@@ -9,6 +9,8 @@ fertig choreografiertes 1080p-Video mit eigenem Soundtrack.
 **Live:** https://hhukkvghj-star.github.io/Chromaflux/ – am Handy in Chrome öffnen, dann funktionieren
 auch Vibration und Halte-Modus (beides braucht eine echte https-Seite).
 
+**Android-App:** https://github.com/hhukkvghj-star/Chromaflux/releases/latest/download/Chromaflux.apk
+
 - **`index.html`** – die interaktive Version. Einfach im Browser öffnen,
   keine Installation, keine externen Abhängigkeiten.
 - **`render/render.mjs`** – rendert das Video Frame für Frame aus genau
@@ -60,6 +62,31 @@ Bewegungssensoren gesperrt. Chrome gibt sie außerdem nur an „sichere" Seiten 
 Daten an, sagt die Seite nach gut einer Sekunde, woran es liegt. Auf dem iPhone fragt Safari einmal
 nach der Erlaubnis für „Bewegung und Ausrichtung" (nur über https). Am Computer simulieren die
 Pfeiltasten die Neigung.
+
+## Android-App
+
+Unter **Releases** liegt immer die neueste `Chromaflux.apk`. GitHub baut sie bei jeder Änderung
+automatisch (`.github/workflows/android.yml`) aus genau derselben `index.html`.
+
+**Installieren:** Den Link oben am Handy öffnen, die heruntergeladene APK antippen. Beim ersten Mal
+fragt Android, ob Chrome bzw. der Datei-Manager Apps installieren darf: einmal erlauben. Neue
+Versionen installieren sich einfach über die alte.
+
+**Was die App zusätzlich kann:**
+- Vibration mit **Stärke-Abstufung** (Explosionen rumpeln kräftig, Tropfen tippen sanft), gespielt als
+  Medien-Vibration und dadurch unabhängig vom Klingelton-Schalter
+- Halte-Modus ohne Browser-Hürden: Sensoren sind freigegeben, die Bildschirmdrehung wird gesperrt
+- Echter Vollbildmodus, der Bildschirm bleibt an, läuft komplett **offline** (die App hat nicht einmal
+  Internetzugriff)
+
+**Technik:** eine schlanke Java-App (`android/`), die die Seite über `WebViewAssetLoader` von einer
+sicheren App-internen Adresse lädt und über eine kleine JavaScript-Brücke (`ChromafluxNative`)
+Vibration und Drehsperre an Android weiterreicht. Die Seite erkennt die Brücke und nutzt sie
+automatisch; im Browser läuft alles wie gehabt.
+
+Die APK ist mit einem bewusst mitgelieferten Hobby-Schlüssel (`android/chromaflux-hobby.keystore`)
+signiert, damit Updates sich über die alte Version installieren lassen. Für den Play Store wäre ein
+geheimer Schlüssel nötig.
 
 ## Bedienung
 

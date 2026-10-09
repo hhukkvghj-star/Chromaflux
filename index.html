@@ -149,6 +149,7 @@ const OPT = {
 };
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches && !RENDER;
 const COARSE = matchMedia('(pointer: coarse)').matches;
+const NATIVE = window.ChromafluxNative || null;   // present when running inside the Android app
 const TAU = Math.PI * 2;
 if (RENDER) document.body.classList.add('render'); else document.body.classList.add('gated');
 
@@ -1296,9 +1297,10 @@ function liveCues(t0, t1) {
 /* ---------- haptics: real vibration patterns on Android, switch-toggle ticks on iOS 18+ ---------- */
 const Haptics = (function () {
   const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  let mode = typeof navigator.vibrate === 'function' && !isIOS ? 'vibrate' : isIOS ? 'ios' : null;
+  let mode = NATIVE ? 'native' : typeof navigator.vibrate === 'function' && !isIOS ? 'vibrate' : isIOS ? 'ios' : null;
   let on = true, label = null, timers = [];
   function unlock() {          // call from a user gesture
+    if (mode === 'native') return true;
     if (mode === 'vibrate') { try { if (!navigator.vibrate(1)) mode = null; } catch (_) { mode = null; } }
     if (mode === 'ios' && !label) {
       label = document.createElement('label'); label.setAttribute('aria-hidden', 'true');
@@ -1309,8 +1311,9 @@ const Haptics = (function () {
     return !!mode;
   }
   const tick = () => { if (label) label.click(); };
-  function play(pattern) {     // [on, off, on, …] in ms
+  function play(pattern, amp) {   // [on, off, on, …] in ms; amp 1–255 only matters in the app
     if (!on || !mode || !pattern || !pattern.length) return;
+    if (mode === 'native') { try { NATIVE.vibrate(pattern.join(','), Math.round(amp || 200)); } catch (_) {} return; }
     if (mode === 'vibrate') { try { navigator.vibrate(pattern); } catch (_) {} return; }
     timers.forEach(clearTimeout); timers = [];
     tick();                    // first tick synchronously, so it still counts as part of a tap
@@ -1319,7 +1322,7 @@ const Haptics = (function () {
   }
   return {
     get supported() { return !!mode; }, get on() { return on; },
-    set on(v) { on = v; if (!v && mode === 'vibrate') { try { navigator.vibrate(0); } catch (_) {} } },
+    set on(v) { on = v; if (!v) { try { if (mode === 'vibrate') navigator.vibrate(0); else if (mode === 'native') NATIVE.cancel(); } catch (_) {} } },
     unlock, play
   };
 })();
@@ -1335,6 +1338,10 @@ const HAPTIC = {
 };
 const EMBEDDED = (function () { try { return window.self !== window.top; } catch (_) { return true; } })();
 function hapticTest() {              // runs inside a tap; reports what actually happened
+  if (NATIVE) {
+    let amp = false; try { NATIVE.vibrate('300,120,300', 255); amp = NATIVE.hasAmplitudeControl(); } catch (_) {}
+    return 'App-Vibration: zweimal 0,3 Sekunden mit voller Kraft gesendet. ' + (amp ? 'Dein Handy kann die Stärke abstufen, Explosionen rumpeln also kräftiger als Tropfen.' : 'Dein Vibrationsmotor kennt nur an und aus, Stärken werden zu Dauer.') + ' Nichts gespürt? Prüfe „Vibration und Haptik" in den Einstellungen.';
+  }
   const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   if (isIOS) { Haptics.unlock(); Haptics.play([40, 120, 40]); return 'iPhone: Safari erlaubt Webseiten keine Vibration. Bis iOS 26.4 gab es einen Umweg, den Apple mit iOS 26.5 geschlossen hat. Falls du gerade zwei Ticks gespürt hast, läuft ein älteres iOS.'; }
   if (typeof navigator.vibrate !== 'function') return 'Dieser Browser kennt die Vibrations-Schnittstelle nicht. Versuch es mit Chrome, Firefox oder Samsung Internet auf Android.';
@@ -1349,10 +1356,10 @@ function hapticTest() {              // runs inside a tap; reports what actually
 function liveHaptics(t0, t1) {
   for (const q of CUES) {
     if (q.t <= t0 || q.t > t1) continue;
-    if (q.k === 'impact' && q.a[0] >= 0.5) Haptics.play(HAPTIC.impact(q.a[0]));
-    else if (q.k === 'plop') Haptics.play(HAPTIC.plop());
-    else if (q.k === 'riser' || q.k === 'swell') Haptics.play(HAPTIC.riser(q.a[0]));
-    else if (q.k === 'whoosh') Haptics.play(HAPTIC.whoosh());
+    if (q.k === 'impact' && q.a[0] >= 0.5) Haptics.play(HAPTIC.impact(q.a[0]), q.a[0] >= 1.2 ? 255 : q.a[0] >= 0.7 ? 225 : 170);
+    else if (q.k === 'plop') Haptics.play(HAPTIC.plop(), 150);
+    else if (q.k === 'riser' || q.k === 'swell') Haptics.play(HAPTIC.riser(q.a[0]), 120);
+    else if (q.k === 'whoosh') Haptics.play(HAPTIC.whoosh(), 190);
   }
 }
 
@@ -1394,7 +1401,7 @@ function palColors() { return PAL[targetPal].colors; }
 function userBurst(x, y, big) {
   burst(x, y, big ? 18 : 11, palColors(), big ? 1.5 : 1.0, { rng: freeRng, life: big ? 1.2 : 0.8, amt: RP.ink > 0.5 ? 6 : 4 });
   flash(x, y, big ? 1.0 : 0.55, mixc(palColors()[0], [1, 1, 1], 0.6));
-  Haptics.play(HAPTIC.impact(big ? 0.9 : 0.4));
+  Haptics.play(HAPTIC.impact(big ? 0.9 : 0.4), big ? 235 : 165);
   if (audio && soundOn) { const n = audio.ctx.currentTime + 0.01; audio.impact(n, big ? 0.9 : 0.5); const sc = PAL[targetPal].scale; audio.cascade(n, sc.slice(0, big ? sc.length : 4)); }
 }
 canvas.addEventListener('pointerdown', e => {
@@ -1432,7 +1439,7 @@ function applyPointers(dt, t) {
       const col = mixc(cols[s.ci % cols.length], cols[(s.ci + 1) % cols.length], 0.5 + 0.5 * Math.sin(t * 0.9));
       dsplat(s.x, s.y, col, clamp(dist * 45, 0.15, RP.ink > 0.5 ? 1.6 : 2.4), r * 0.75);
       speedSum += dist / Math.max(dt, 1e-3);
-      if ((s.hapT -= dt) <= 0 && dist > 0.004) { s.hapT = 0.14; Haptics.play(HAPTIC.tick()); }
+      if ((s.hapT -= dt) <= 0 && dist > 0.004) { s.hapT = 0.14; Haptics.play(HAPTIC.tick(), 70); }
       if (audio && soundOn && (s.bellT -= dt) <= 0 && dist > 0.004) {
         s.bellT = 0.22; const sc = PAL[targetPal].scale;
         audio.bell(audio.ctx.currentTime + 0.01, sc[Math.floor(clamp(s.y, 0, 0.999) * sc.length)], 0.1, s.x * 2 - 1);
@@ -1571,10 +1578,10 @@ function holdUpdate(dt, t) {
   const tr = Hold.tiltRate, sp = Math.abs(Hold.spin);
   Hold.hapT -= dt;
   Hold.peak = tr > Hold.peak ? tr : Hold.peak * Math.exp(-dt / 0.5);
-  if (Hold.peak > 2.5 && tr < 0.6) { Haptics.play([70, 40, 35]); Hold.peak = 0; Hold.hapT = 0.25; }
+  if (Hold.peak > 2.5 && tr < 0.6) { Haptics.play([70, 40, 35], 235); Hold.peak = 0; Hold.hapT = 0.25; }
   else if (Hold.hapT <= 0 && (tr > 1.2 || sp > 2)) {
     const k = Math.min(1, Math.max(tr / 5, sp / 6));
-    Haptics.play([Math.round(28 + 40 * k)]); Hold.hapT = 0.42 - 0.27 * k;
+    Haptics.play([Math.round(28 + 40 * k)], 60 + 140 * k); Hold.hapT = 0.42 - 0.27 * k;
   }
   if (dragVoice && soundOn) {     // the glide tone sings the tilt: pitch = direction, loudness = movement
     const now = audio.ctx.currentTime, sc = PAL[targetPal].scale;
@@ -1598,7 +1605,8 @@ async function enterHold() {
   if (Hold.on) return;
   try {                          // immersive and orientation-stable where the browser allows it (Android)
     const el = document.documentElement;
-    if (!IOS && !document.fullscreenElement && el.requestFullscreen) {
+    if (NATIVE) NATIVE.lockOrientation(true);
+    else if (!IOS && !document.fullscreenElement && el.requestFullscreen) {
       el.requestFullscreen({ navigationUI: 'hide' }).then(() => {
         const o = screen.orientation; if (o && o.lock) o.lock(o.type).catch(() => {});
       }).catch(() => {});
@@ -1633,7 +1641,7 @@ function exitHold() {
   if (!Hold.on) return;
   Hold.on = false; window.removeEventListener('devicemotion', onMotion);
   document.body.classList.remove('hold'); bHold.setAttribute('aria-pressed', 'false'); levelEl.hidden = true; hintEl.innerHTML = hintFree;
-  try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch (_) {}
+  try { if (NATIVE) NATIVE.lockOrientation(false); else if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch (_) {}
   if (dragVoice && soundOn) dragVoice.gain.gain.setTargetAtTime(0, audio.ctx.currentTime, 0.1);
   updateHud(true);
 }
@@ -1654,6 +1662,7 @@ document.getElementById('bSound').addEventListener('click', () => { wake(); enab
 document.getElementById('bAuto').addEventListener('click', () => { wake(); setAutopilot(!autopilot); });
 document.getElementById('bFlash').addEventListener('click', () => { wake(); bigFlash(); });
 document.getElementById('bFull').addEventListener('click', () => { wake(); toggleFull(); });
+if (NATIVE) document.getElementById('bFull').hidden = true;
 const bHaptic = document.getElementById('bHaptic');
 function setHaptics(v) { Haptics.on = v; bHaptic.setAttribute('aria-pressed', v ? 'true' : 'false'); bHaptic.setAttribute('aria-label', v ? 'Vibration ausschalten (V)' : 'Vibration einschalten (V)'); if (v) Haptics.play(HAPTIC.jump()); }
 bHaptic.addEventListener('click', () => { wake(); setHaptics(!Haptics.on); });
@@ -1730,7 +1739,7 @@ document.getElementById('bStartHold').addEventListener('click', e => { e.stopPro
 gateEl.addEventListener('click', () => startExperience(true));
 {
   const bt = document.getElementById('bHapticTest'), st = document.getElementById('hapticStatus');
-  if (typeof navigator.vibrate === 'function' || /iP(hone|ad|od)/.test(navigator.userAgent)) bt.hidden = false;
+  if (NATIVE || typeof navigator.vibrate === 'function' || /iP(hone|ad|od)/.test(navigator.userAgent)) bt.hidden = false;
   bt.addEventListener('click', e => { e.stopPropagation(); st.textContent = hapticTest(); st.hidden = false; });
   st.addEventListener('click', e => e.stopPropagation());
 }
