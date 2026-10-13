@@ -48,6 +48,11 @@ und die Farbe bringst du selbst hinein:
   du eine Farbspur.
 - **Ziehen** rührt nur. Es kommt keine neue Farbe dazu, die vorhandene wird verwirbelt.
 - **Schütteln** (oder `Leertaste` bzw. ⚡) zündet eine Farbexplosion.
+- **Zwei Finger nach oben wischen** (oder `X`) gießt das Glas aus: Die Flüssigkeit strömt zum oberen
+  Rand und läuft dort gluckernd ab. Ist das Glas leer, klingt es hell.
+- **Das Glas singt:** Je voller es ist, desto tiefer klingt es – wie ein echtes Glas. Jeder Tropfen
+  macht „Blubb" und lässt das Glas in der Höhe seines Füllstands anklingen, Gießen gluckert, und Rühren
+  klingt wie ein nasser Finger am Rand eines Weinglases.
 - Die Flüssigkeit bleibt im Glas und verblasst nur langsam. Milchig verrührte Stellen klären sich
   zuerst, damit das Glas nicht zu Weißbrei wird.
 - Die Kapitel-Knöpfe `1`–`5` leeren das Glas und füllen es mit der neuen Palette.
@@ -68,6 +73,8 @@ Aktivieren wird das Glas mit frischer Farbe gefüllt, die kaum noch verblasst.
 - **Schütteln:** Ein kräftiger Ruck zündet eine Farbexplosion mit Blitz, Klang und Vibration.
   Schon leichtes Hin- und Herbewegen lässt die Farbe träge hinterherschwappen.
 - **Drehen** in der Bildebene: Die Flüssigkeit bleibt zurück und dreht sich als Strudel gegenläufig.
+- **Über Kopf drehen:** Der obere Bildschirmrand ist der Glasrand. Drehst du das Handy so weit, dass er
+  unten liegt, läuft die Flüssigkeit dort gluckernd aus, und zum Schluss klingt das leere Glas.
 - **Klang:** Der Gleitton folgt der Neigung, Tonhöhe = Richtung, Lautstärke = Bewegung.
 - Eine kleine **Wasserwaage** oben rechts zeigt, wohin die Schwerkraft gerade zieht.
 - Kapitel-Knöpfe wechseln im Halte-Modus nur die Farbpalette und füllen das Glas neu.
@@ -116,6 +123,8 @@ geheimer Schlüssel nötig.
 | Tippen / Klick | Demo: Farbexplosion mit Lichtblitz · freies Spiel und Halte-Modus: Tropfen setzen |
 | Lange drücken (Finger/Maus) | freies Spiel und Halte-Modus: Farbe gießen |
 | Handy schütteln | freies Spiel und Halte-Modus: Farbexplosion |
+| Zwei Finger nach oben wischen / `X` | freies Spiel und Halte-Modus: Glas ausgießen |
+| Handy über Kopf drehen | Halte-Modus: Glas ausgießen |
 | `Leertaste` | großer Flash in der Bildmitte |
 | `1`–`5` | zu einem Kapitel springen |
 | `A` | Autopilot (Regie) an/aus – aus = freies Spiel mit der gewählten Palette |
@@ -151,8 +160,24 @@ geheimer Schlüssel nötig.
 - **Ton:** WebAudio-Synthese (Pad mit gleitenden Akkorden, FM-Glocken, Riser, Impacts mit
   Sidechain-Ducking, Faltungshall, gläserner Gleitton beim Ziehen). Am Ende der Kette sitzen ein
   Kompressor und ein 4×-oversampelter Soft-Limiter, damit auch wildes Klicken nie übersteuert.
-  Live identisch zum Video-Soundtrack, der per `OfflineAudioContext` entsteht.
+  Live identisch zum Video-Soundtrack, der per `OfflineAudioContext` entsteht. Im freien Spiel misst
+  ein kleiner Shader zehnmal pro Sekunde den Füllstand des Glases und liest ihn asynchron zurück
+  (Pixel-Buffer + Fence, also ohne die Grafikkarte auszubremsen); danach richtet sich die Tonhöhe.
 - **Qualität:** passt sich automatisch an das Gerät an (Eco/Mid/High).
+
+## Tests
+
+```bash
+node test/glass.mjs                     # 21 Prüfungen, Exit-Code 1 bei einem Fehler
+node test/glass.mjs --stills=out/test   # zusätzlich Standbilder der Szenarien
+```
+
+Der Test steuert die Seite in headless Chromium, parkt die Echtzeit-Schleife und rechnet die Simulation
+von Hand mit echten 60 fps – so gelten die Prüfungen auch ohne Grafikkarte. Geprüft wird: Die Demo ist
+unverändert (Tippen = Explosion, Ziehen malt), im Glas setzt Tippen Tropfen, langes Drücken gießt, Ziehen
+rührt ohne neue Farbe, die Flüssigkeit bleibt im Glas, Schütteln zündet, und Ausgießen klappt per
+Zwei-Finger-Wisch, Taste `X` und über Kopf im Halte-Modus – inklusive Gluckern und Glaston. Dazu darf die
+Konsole keinen einzigen Fehler melden.
 
 ## Video neu rendern
 

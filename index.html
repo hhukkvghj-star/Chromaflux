@@ -192,7 +192,7 @@ const RKEYS = ['ink', 'metal', 'irid', 'spec', 'bloom', 'thr', 'rays', 'streak',
 const VKEYS = ['bgTop', 'bgBot', 'accent'];
 PAL.forEach(p => { p.colors = p.hex.map(lin); VKEYS.forEach(k => { p.r[k] = lin(p.r[k]); }); });
 
-const SIM_BASE = { vort: 8, gx: 0, buoy: 0, shear: 0, shearW: 0.07, shearRate: 1.0, swirl: 0, velDiss: 0.35, dyeDiss: 0.3, maxV: 3.0, noise: 0.06, noiseS: 1.6, sat: 0, satK: 1.5, milk: 0, wall: 0, presK: 0.8 };
+const SIM_BASE = { vort: 8, gx: 0, buoy: 0, shear: 0, shearW: 0.07, shearRate: 1.0, swirl: 0, velDiss: 0.35, dyeDiss: 0.3, maxV: 3.0, noise: 0.06, noiseS: 1.6, sat: 0, satK: 1.5, milk: 0, wall: 0, presK: 0.8, drain: 0, pourX: 0, pourY: 0 };
 const sim = Object.assign({}, SIM_BASE);
 const RP = {};
 let targetPal = 0, palTau = 0.6;
@@ -271,12 +271,14 @@ vec2 blast(vec2 uv){
 }
 `;
 const WL = `
-uniform float uWall;
+uniform float uWall, uDrain; uniform vec2 uPour;
 vec2 wallv(vec2 uv, vec2 v){          // glass play: dye comes to rest at the walls instead of draining through them
   if (uWall <= 0.0) return v;
+  // pouring out: the liquid streams toward the rim in uneven tongues, quickening as it nears it
+  v += uPour * (0.8 + 0.4 * uv.y) * (0.75 + 0.3 * sin(uv.x * 11.0) + 0.15 * sin(uv.x * 23.0 + uv.y * 7.0));
   float ar = 1.0 / uVS.x;
   v.x *= smoothstep(0.0, uWall, v.x < 0.0 ? uv.x * ar : (1.0 - uv.x) * ar);
-  v.y *= smoothstep(0.0, uWall, v.y < 0.0 ? uv.y : 1.0 - uv.y);
+  v.y *= smoothstep(0.0, uWall, v.y < 0.0 ? uv.y : (uDrain > 0.0 ? 1.0 : 1.0 - uv.y));   // the top is the rim: open while pouring out
   return v;
 }
 `;
@@ -375,6 +377,18 @@ void main(){
   o = texture(uSrc, c) / (1.0 + uDiss * uDt);
 }`;
 
+// how full the glass is: liquid coverage over a 16×16 grid, and how much of it sits just below the rim
+FS.level = HDR + NB + `
+uniform sampler2D uDye;
+void main(){
+  float cov = 0.0, rim = 0.0;
+  for (int j = 0; j < 16; j++) for (int i = 0; i < 16; i++) {
+    float c = smoothstep(0.08, 0.35, texture(uDye, (vec2(float(i), float(j)) + 0.5) / 16.0).a);
+    cov += c; if (j == 13) rim += c;                       // just below the rim, where the outflow gathers
+  }
+  o = vec4(cov / 256.0, 0.0, rim / 16.0, 1.0);
+}`;
+
 FS.mac = HDR + NB + `
 uniform sampler2D uVel; uniform sampler2D uSrc; uniform sampler2D uHat;
 uniform float uDt, uDiss; uniform vec2 uVS; uniform vec2 uSize; uniform vec4 uMax; uniform vec3 uSat;` + BL + WL + `
@@ -394,7 +408,8 @@ void main(){
   r = max(r, vec4(0.0));
   // a glass never silts up: dense colour above the knee settles back, and milky (desaturated) mixes clear first
   float hi = max(max(r.r, r.g), r.b), lo = min(min(r.r, r.g), r.b);
-  float extra = uSat.x * max(hi - uSat.y, 0.0) + uSat.z * smoothstep(0.35, 0.8, lo / max(hi, 1e-4)) * smoothstep(0.02, 0.2, hi);
+  float extra = uSat.x * max(hi - uSat.y, 0.0) + uSat.z * smoothstep(0.35, 0.8, lo / max(hi, 1e-4)) * smoothstep(0.02, 0.2, hi)
+              + uDrain * smoothstep(0.86, 1.0, vUv.y);                                   // liquid reaching an open rim leaves the glass
   o = min(r / (1.0 + (uDiss + extra) * uDt), uMax);
 }`;
 
@@ -828,12 +843,12 @@ function step(dt, time) {
     if (nb < 4) { BL_ARR.set([b.x, b.y, b.r * b.r, b.s * k], nb * 4); nb++; }
   }
   p = P.advect.use(); f2(p, 'uTexel', vel.tx, vel.ty); tex(p, 'uVel', 0, vel.read); tex(p, 'uSrc', 1, vel.read);
-  f1(p, 'uDt', dt); f1(p, 'uDiss', sim.velDiss); f2(p, 'uVS', 1 / ar, 1); i1(p, 'uBlastN', 0); f1(p, 'uWall', 0); blit(vel.write); vel.swap();
+  f1(p, 'uDt', dt); f1(p, 'uDiss', sim.velDiss); f2(p, 'uVS', 1 / ar, 1); i1(p, 'uBlastN', 0); f1(p, 'uWall', 0); f1(p, 'uDrain', 0); blit(vel.write); vel.swap();
   // dye: MacCormack (forward pass, then corrected pass)
   p = P.advect.use(); f2(p, 'uTexel', dye.tx, dye.ty); tex(p, 'uVel', 0, vel.read); tex(p, 'uSrc', 1, dye.read);
-  f1(p, 'uDt', dt); f1(p, 'uDiss', 0); f2(p, 'uVS', 1 / ar, 1); f1(p, 'uWall', sim.wall); setBlast(p, nb, ar); blit(dyeHat);
+  f1(p, 'uDt', dt); f1(p, 'uDiss', 0); f2(p, 'uVS', 1 / ar, 1); f1(p, 'uWall', sim.wall); f1(p, 'uDrain', sim.drain); f2(p, 'uPour', sim.pourX, sim.pourY); setBlast(p, nb, ar); blit(dyeHat);
   p = P.mac.use(); f2(p, 'uTexel', dye.tx, dye.ty); tex(p, 'uVel', 0, vel.read); tex(p, 'uSrc', 1, dye.read); tex(p, 'uHat', 2, dyeHat);
-  f1(p, 'uDt', dt); f1(p, 'uDiss', sim.dyeDiss); f2(p, 'uVS', 1 / ar, 1); f2(p, 'uSize', dye.w, dye.h); f4(p, 'uMax', 14, 14, 14, 6); f3(p, 'uSat', sim.sat, sim.satK, sim.milk); f1(p, 'uWall', sim.wall); setBlast(p, nb, ar);
+  f1(p, 'uDt', dt); f1(p, 'uDiss', sim.dyeDiss); f2(p, 'uVS', 1 / ar, 1); f2(p, 'uSize', dye.w, dye.h); f4(p, 'uMax', 14, 14, 14, 6); f3(p, 'uSat', sim.sat, sim.satK, sim.milk); f1(p, 'uWall', sim.wall); f1(p, 'uDrain', sim.drain); f2(p, 'uPour', sim.pourX, sim.pourY); setBlast(p, nb, ar);
   blit(dye.write); dye.swap();
   if (pstate && RP.part > 0.01) {
     p = P.pupdate.use(); tex(p, 'uState', 0, pstate.read); tex(p, 'uVel', 1, vel.read);
@@ -1226,6 +1241,24 @@ function Score(ctx, dest) {
       g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.45, t + dur * 0.85); g.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.9);
       n.connect(f); f.connect(g); route(g, 0.8, 0.5);
     },
+    bubble(t, f, vel, pan) {    // an air bubble: a sine that chirps upward as it rises and pops
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.setValueAtTime(f, t); o.frequency.exponentialRampToValueAtTime(f * 1.9, t + 0.05);
+      o.connect(g); env(g, t, 0.24 * vel, 0.004, 0.09); route(g, 0.7, 0.5, pan); o.start(t); o.stop(t + 0.16);
+    },
+    ping(t, f, vel, pan) {      // the glass itself: a pure tone plus the inharmonic partials of a wine glass
+      [[1, 1, 2.2], [2.32, 0.3, 1.1], [4.1, 0.09, 0.5]].forEach(([k, a, d]) => {
+        const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = f * k;
+        o.connect(g); env(g, t, 0.075 * vel * a, 0.003, d); route(g, 0.5, 0.8, pan); o.start(t); o.stop(t + d + 0.1);
+      });
+    },
+    glug(t, f, vel, pan) {      // liquid leaving over the rim: a low gulp of air with a wet edge
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.setValueAtTime(f, t); o.frequency.exponentialRampToValueAtTime(f * 1.7, t + 0.08);
+      o.connect(g); env(g, t, 0.32 * vel, 0.006, 0.11); route(g, 0.8, 0.35, pan); o.start(t); o.stop(t + 0.2);
+      const n = noiseSrc(t, 0.12), bp = ctx.createBiquadFilter(), ng = ctx.createGain();
+      bp.type = 'bandpass'; bp.frequency.value = f * 3; bp.Q.value = 3; n.connect(bp); bp.connect(ng); env(ng, t, 0.06 * vel, 0.004, 0.06); route(ng, 0.6, 0.3, pan);
+    },
     plop(t, vel, pan) {
       const o = ctx.createOscillator(), g = ctx.createGain();
       o.frequency.setValueAtTime(260, t); o.frequency.exponentialRampToValueAtTime(950, t + 0.06);
@@ -1434,15 +1467,91 @@ function dropAt(x, y) {
   if (f) vsplat(x, y, f[0] * 0.55, f[1] * 0.55, 0.03);            // falls in and curls into a mushroom
   else burst(x, y, 7, [col], 0.3, { rng: freeRng, life: 0.3, amt: 1.4, blast: 0.06, blastR: 0.05, ring: 0.008, jetR: 0.01, curl: 0.8 });   // lands and blooms
   Haptics.play([30], 130);
-  if (audio && soundOn) audio.plop(audio.ctx.currentTime + 0.005, 0.9, clamp(x * 2 - 1, -1, 1));
+  if (audio && soundOn) {         // a deep blub, then the glass answers at the pitch of its fill level
+    const n = audio.ctx.currentTime + 0.005, gm = glassMidi(), pan = clamp(x * 2 - 1, -1, 1);
+    audio.bubble(n, mtof(gm - 19), 0.9, pan); audio.ping(n + 0.012, mtof(gm), 0.7, pan);
+  }
 }
 function pourStep(s, dt) {        // a pipette held still keeps dripping
   const f = glassFlow();
   dsplat(s.x, s.y, s.col, (RP.ink > 0.5 ? 2.6 : 1.7) * dt, 0.018);
   if (f) nsplat(s.x, s.y, f[0] * 0.35, f[1] * 0.35, 0.024, clamp(dt * 8, 0, 1));
-  if ((s.dripT -= dt) <= 0) {
-    s.dripT = 0.17; Haptics.play([18], 80);
-    if (audio && soundOn) audio.plop(audio.ctx.currentTime + 0.005, 0.45, clamp(s.x * 2 - 1, -1, 1));
+  if ((s.dripH -= dt) <= 0) { s.dripH = 0.17; Haptics.play([18], 80); }
+  if ((s.dripT -= dt) <= 0) {     // pouring gurgles: bubbles at an uneven pace, deeper the fuller the glass
+    s.dripT = 0.05 + 0.09 * freeRng();
+    if (audio && soundOn) audio.bubble(audio.ctx.currentTime + 0.005, mtof(glassMidi() - 19) * (0.8 + 0.45 * freeRng()), 0.35 + 0.35 * freeRng(), clamp(s.x * 2 - 1, -1, 1));
+  }
+}
+function glassMidi() {            // a glass sings lower the fuller it is: empty it rings at the top of the palette's scale
+  const sc = PAL[targetPal].scale, notes = sc.map(m => m - 12).concat(sc);
+  return notes[Math.round((1 - clamp(Level.fill / 0.6, 0, 1)) * (notes.length - 1))];
+}
+
+/* ---------- pouring the glass out: the top edge is the rim ----------
+   Tip the phone past it in hold mode, or swipe two fingers up (key X), and the liquid runs out over the top. */
+const Out = { t: 0, dur: 3.0, open: 0, openT: -9, glugT: 0 };
+function pourOut() {
+  if (autopilot || Out.t > 0) return;
+  Out.t = Out.dur; Out.glugT = 0; Out.openT = simT;
+  Haptics.play([40, 50, 40], 150);
+}
+function outUpdate(dt, t) {
+  let dir = [0, 1], open = 0;
+  if (Hold.on) {                  // tipped over the rim, the liquid falls out along the real gravity
+    const g = holdGravity(), m = Math.hypot(g[0], g[1]);
+    open = smooth(0.2, 0.65, g[1]); if (m > 0.1) dir = [g[0] / m, g[1] / m];
+  }
+  if (Out.t > 0) {
+    Out.t -= dt; dir = [0, 1];
+    open = smooth(0, 0.6, Out.dur - Out.t);
+    sim.gx = 0; sim.buoy = 1.2;                                        // everything rushes to the rim…
+    if (Out.t < 0.6) sim.dyeDiss = 0.045 + 3.5 * (1 - Out.t / 0.6);    // …and what clings to the glass runs off last
+  }
+  else sim.dyeDiss += 0.5 * open;                                      // held upside down, the film left on the glass runs off too
+  Out.open = open; if (open > 0.3) Out.openT = t;
+  sim.drain = 8 * open; sim.presK = lerp(sim.presK, 0.8, open);        // an open rim no longer holds the liquid up
+  sim.pourX = 0.55 * open * dir[0]; sim.pourY = 0.55 * open * dir[1];
+}
+
+/* ---------- glass level: how full the glass is, read back a few times a second without stalling the GPU ---------- */
+const Level = { fill: 0, fill0: 0, rim: 0, armed: false, t: 0, target: null, pbo: null, sync: null, px: new Uint8Array(4) };
+function levelUpdate(dt) {
+  if (Level.sync) {
+    if (gl.clientWaitSync(Level.sync, 0, 0) === gl.TIMEOUT_EXPIRED) return;
+    gl.deleteSync(Level.sync); Level.sync = null;
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, Level.pbo); gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, Level.px); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    Level.fill += (Level.px[0] / 255 - Level.fill) * 0.6; Level.rim += (Level.px[2] / 255 - Level.rim) * 0.6;
+  }
+  if ((Level.t -= dt) > 0) return;
+  Level.t = 0.1;
+  if (!Level.target) {
+    const tx = gl.createTexture(); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tx);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    const fbo = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tx, 0);
+    Level.target = { tex: tx, fbo, w: 1, h: 1 };
+    Level.pbo = gl.createBuffer(); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, Level.pbo); gl.bufferData(gl.PIXEL_PACK_BUFFER, 4, gl.STREAM_READ); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+  }
+  const p = P.level.use(); tex(p, 'uDye', 0, dye.read); blit(Level.target);
+  gl.bindBuffer(gl.PIXEL_PACK_BUFFER, Level.pbo); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, 0); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+  Level.sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush();
+}
+function glassSound(dt, t) {
+  // pouring out: gulps of air come faster the more liquid sits at the rim, and rise in pitch as the glass empties
+  const flow = Out.open * Math.max(Level.rim, Out.t > 0 && Level.fill > 0.03 ? 0.35 : 0);
+  if (flow > 0.04 && (Out.glugT -= dt) <= 0) {
+    const k = clamp(flow, 0, 1);
+    Out.glugT = (0.24 - 0.13 * k) * (0.75 + 0.5 * freeRng());
+    Haptics.play([22], 70 + 90 * k);
+    if (audio && soundOn) audio.glug(audio.ctx.currentTime + 0.01, mtof(glassMidi() - 24) * (0.9 + 0.2 * freeRng()), 0.5 + 0.5 * k, (freeRng() - 0.5) * 0.6);
+  }
+  // the moment the last of it has left, the empty glass rings bright (a half-hearted tip does not count)
+  if (Out.open > 0.3 && !Level.armed && Level.fill > 0.02) { Level.armed = true; Level.fill0 = Level.fill; }
+  if (Level.armed && t - Out.openT > 2.5) Level.armed = false;
+  if (Level.armed && Level.fill < Math.max(0.012, 0.2 * Level.fill0)) {
+    Level.armed = false; Haptics.play([30], 150);
+    if (audio && soundOn) { const sc = PAL[targetPal].scale; audio.ping(audio.ctx.currentTime + 0.01, mtof(sc[sc.length - 1]), 1.3, 0); }
   }
 }
 let motionAsked = false;
@@ -1454,7 +1563,7 @@ canvas.addEventListener('pointerdown', e => {
   wake(); if (!autopilot) askMotionOnce();
   try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
   const p = toUv(e);
-  pointers.set(e.pointerId, { x: p[0], y: p[1], px: p[0], py: p[1], t0: performance.now(), cx: e.clientX, cy: e.clientY, moved: 0, ci: colorIdx++, bellT: 0, hapT: 0, pour: false, dripT: 0, col: null });
+  pointers.set(e.pointerId, { x: p[0], y: p[1], px: p[0], py: p[1], t0: performance.now(), cx: e.clientX, cy: e.clientY, moved: 0, ci: colorIdx++, bellT: 0, hapT: 0, pour: false, dripT: 0, dripH: 0, col: null, y0: p[1] });
 });
 canvas.addEventListener('pointermove', e => {
   wake();
@@ -1476,6 +1585,11 @@ window.addEventListener('pointermove', () => wake(), { passive: true });
 function applyPointers(dt, t) {
   let speedSum = 0, lead = null;
   const ar = AR();
+  if (!autopilot && pointers.size >= 2 && Out.t <= 0) {          // two fingers swiped up together: pour the glass out
+    let up = true; const now = performance.now();
+    pointers.forEach(s => { if (s.y - s.y0 < 0.16 || now - s.t0 > 900) up = false; });
+    if (up) { pointers.forEach(s => { s.y0 = 9; }); pourOut(); }
+  }
   pointers.forEach(s => {
     const dx = s.x - s.px, dy = s.y - s.py, dist = Math.hypot(dx * ar, dy);
     if (!autopilot && !s.pour && s.moved < 10 && performance.now() - s.t0 > 300) { s.pour = true; s.col = nextDropColor(); }
@@ -1492,7 +1606,7 @@ function applyPointers(dt, t) {
       }
       speedSum += dist / Math.max(dt, 1e-3);
       if ((s.hapT -= dt) <= 0 && dist > 0.004) { s.hapT = 0.14; Haptics.play(HAPTIC.tick(), 70); }
-      if (audio && soundOn && (s.bellT -= dt) <= 0 && dist > 0.004) {
+      if (autopilot && audio && soundOn && (s.bellT -= dt) <= 0 && dist > 0.004) {   // glass play: stirring sings instead (below)
         s.bellT = 0.22; const sc = PAL[targetPal].scale;
         audio.bell(audio.ctx.currentTime + 0.01, sc[Math.floor(clamp(s.y, 0, 0.999) * sc.length)], 0.1, s.x * 2 - 1);
       }
@@ -1501,11 +1615,14 @@ function applyPointers(dt, t) {
   });
   if (dragVoice && soundOn && !Hold.on) {
     const now = audio.ctx.currentTime, sc = PAL[targetPal].scale;
-    if (lead) {
+    if (lead && autopilot) {
       const f = mtof(sc[Math.floor(clamp(lead.y, 0, 0.999) * sc.length)] - 12);
       dragVoice.o1.frequency.setTargetAtTime(f, now, 0.09); dragVoice.o2.frequency.setTargetAtTime(f * 1.5, now, 0.09);
+    } else if (lead) {            // stirring rubs the rim: the glass sings at the pitch of its fill level
+      const f = mtof(glassMidi());
+      dragVoice.o1.frequency.setTargetAtTime(f, now, 0.25); dragVoice.o2.frequency.setTargetAtTime(f * 2.005, now, 0.25);
     }
-    dragVoice.gain.gain.setTargetAtTime(Math.min(speedSum * 0.025, 0.12), now, 0.12);
+    dragVoice.gain.gain.setTargetAtTime(Math.min(speedSum * 0.025, 0.12), now, autopilot ? 0.12 : 0.22);
   }
 }
 
@@ -1518,7 +1635,9 @@ function freeUpdate(dt, t) {
   FX.white = 0; FX.title = 0; FX.fade = 1;
   if (Hold.on) holdUpdate(dt, t);
   shakeCheck(dt);
+  outUpdate(dt, t);
   if (Hold.pourAt >= 0 && t >= Hold.pourAt) { Hold.pourAt = -1; pourGlass(); }
+  levelUpdate(dt); glassSound(dt, t);
   if (t < D.clearUntil) { sim.dyeDiss = 4; sim.velDiss = 2; }
 }
 
@@ -1526,7 +1645,7 @@ function jumpChapter(i) {
   const ch = CHAPTERS[i];
   JETS.length = 0; BLASTS.length = 0;
   if (!autopilot) {
-    setPal(ch.pal, 0.45); D.clearUntil = simT + 0.35; Hold.pourAt = simT + 0.4;
+    setPal(ch.pal, 0.45); D.clearUntil = simT + 0.35; Hold.pourAt = simT + 0.4; Out.t = 0;   // a fresh glass, not poured out again
     flash(0.5, 0.5, 0.35, mixc(PAL[ch.pal].colors[0], [1, 1, 1], 0.5)); Haptics.play(HAPTIC.jump());
     if (audio && soundOn) syncScore(simT);
     updateHud(true); return;
@@ -1545,10 +1664,10 @@ function jumpChapter(i) {
 function setAutopilot(on, quiet) {
   if (on && Hold.on) exitHold();
   autopilot = on;
-  listenMotion(!on); pointers.clear();
+  listenMotion(!on); pointers.clear(); Out.t = 0; Level.armed = false;
   hintEl.innerHTML = on ? HINT_DEMO : Hold.on ? HINT_HOLD : HINT_GLASS;
   if (!on) askMotionOnce();
-  if (!on && !quiet) toast('Freies Spiel: Tippen setzt einen Tropfen, lange drücken gießt, Ziehen rührt, Schütteln zündet eine Explosion.', 5200);
+  if (!on && !quiet) toast('Freies Spiel: Tippen setzt einen Tropfen, lange drücken gießt, Ziehen rührt, zwei Finger nach oben gießen das Glas aus, Schütteln zündet eine Explosion.', 5600);
   const b = document.getElementById('bAuto'); b.setAttribute('aria-pressed', on ? 'true' : 'false');
   if (on) { dirSeek(simT); lastCueT = simT; }
   if (audio && soundOn) syncScore(simT);
@@ -1576,8 +1695,8 @@ const HOLD_G = 0.9;             // pull on heavy dye, height units / s² per uni
 const bHold = document.getElementById('bHold'), levelEl = document.getElementById('level'), levelDot = levelEl.firstElementChild;
 const hintEl = document.getElementById('hint'), toastEl = document.getElementById('toast');
 const HINT_DEMO = hintEl.innerHTML;
-const HINT_GLASS = '<b>Tippen</b> Tropfen · <b>Lange drücken</b> gießen · <b>Ziehen</b> rühren · <b>Schütteln</b>/<b>Leertaste</b> Explosion · <b>1–5</b> Farben';
-const HINT_HOLD = '<b>Neigen</b> fließen · <b>Tippen</b> Tropfen · <b>Lange drücken</b> gießen · <b>Schütteln</b> Explosion · <b>Drehen</b> Strudel · <b>Pfeiltasten</b> neigen ohne Sensor · <b>G</b> beenden';
+const HINT_GLASS = '<b>Tippen</b> Tropfen · <b>Lange drücken</b> gießen · <b>Ziehen</b> rühren · <b>2 Finger hoch</b>/<b>X</b> ausgießen · <b>Schütteln</b>/<b>Leertaste</b> Explosion · <b>1–5</b> Farben';
+const HINT_HOLD = '<b>Neigen</b> fließen · <b>Über Kopf</b> ausgießen · <b>Tippen</b> Tropfen · <b>Lange drücken</b> gießen · <b>Schütteln</b> Explosion · <b>Drehen</b> Strudel · <b>Pfeiltasten</b> neigen ohne Sensor · <b>G</b> beenden';
 function toast(msg, ms) {
   ms = ms || 4000; toastEl.textContent = msg; toastEl.hidden = false; toastEl.classList.remove('fade');
   clearTimeout(toast.a); clearTimeout(toast.b);
@@ -1692,7 +1811,7 @@ async function enterHold() {
   document.body.classList.add('hold'); bHold.setAttribute('aria-pressed', 'true'); levelEl.hidden = false;
   hintEl.innerHTML = HINT_HOLD;
   flash(0.5, 0.5, 0.35, mixc(palColors()[0], [1, 1, 1], 0.5)); Haptics.play(HAPTIC.jump());
-  toast('Halte das Handy wie ein Glas: Neigen lässt die Farben fließen, Tippen setzt Tropfen, Schütteln zündet sie, Drehen rührt einen Strudel.', 5200);
+  toast('Halte das Handy wie ein Glas: Neigen lässt die Farben fließen, über Kopf gedreht läuft es oben aus, Tippen setzt Tropfen, Schütteln zündet sie, Drehen rührt einen Strudel.', 5600);
   setTimeout(holdDiagnose, 1600);
   wake(); updateHud(true);
 }
@@ -1740,6 +1859,7 @@ window.addEventListener('keydown', e => {
   else if (k === 'p') paused = !paused;
   else if (k === 'v' && Haptics.supported) setHaptics(!Haptics.on);
   else if (k === 'g') { Hold.on ? exitHold() : enterHold(); }
+  else if (k === 'x') pourOut();
   else if (Hold.on && k.startsWith('arrow')) {
     e.preventDefault();
     const d = { arrowleft: [-0.35, 0], arrowright: [0.35, 0], arrowup: [0, 0.35], arrowdown: [0, -0.35] }[k];
