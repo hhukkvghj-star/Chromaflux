@@ -192,7 +192,7 @@ const RKEYS = ['ink', 'metal', 'irid', 'spec', 'bloom', 'thr', 'rays', 'streak',
 const VKEYS = ['bgTop', 'bgBot', 'accent'];
 PAL.forEach(p => { p.colors = p.hex.map(lin); VKEYS.forEach(k => { p.r[k] = lin(p.r[k]); }); });
 
-const SIM_BASE = { vort: 8, gx: 0, buoy: 0, shear: 0, shearW: 0.07, shearRate: 1.0, swirl: 0, velDiss: 0.35, dyeDiss: 0.3, maxV: 3.0, noise: 0.06, noiseS: 1.6, sat: 0, satK: 1.5, milk: 0, wall: 0, presK: 0.8, drain: 0, pourX: 0, pourY: 0 };
+const SIM_BASE = { vort: 8, gx: 0, buoy: 0, shear: 0, shearW: 0.07, shearRate: 1.0, swirl: 0, velDiss: 0.35, dyeDiss: 0.3, maxV: 3.0, noise: 0.06, noiseS: 1.6, sat: 0, satK: 1.5, milk: 0, wall: 0, presK: 0.8, drain: 0, rim: 0, pourX: 0, pourY: 0 };
 const sim = Object.assign({}, SIM_BASE);
 const RP = {};
 let targetPal = 0, palTau = 0.6;
@@ -271,14 +271,14 @@ vec2 blast(vec2 uv){
 }
 `;
 const WL = `
-uniform float uWall, uDrain; uniform vec2 uPour;
+uniform float uWall, uDrain, uRim; uniform vec2 uPour;
 vec2 wallv(vec2 uv, vec2 v){          // glass play: dye comes to rest at the walls instead of draining through them
   if (uWall <= 0.0) return v;
   // pouring out: the liquid streams toward the rim in uneven tongues, quickening as it nears it
   v += uPour * (0.8 + 0.4 * uv.y) * (0.75 + 0.3 * sin(uv.x * 11.0) + 0.15 * sin(uv.x * 23.0 + uv.y * 7.0));
   float ar = 1.0 / uVS.x;
   v.x *= smoothstep(0.0, uWall, v.x < 0.0 ? uv.x * ar : (1.0 - uv.x) * ar);
-  v.y *= smoothstep(0.0, uWall, v.y < 0.0 ? uv.y : (uDrain > 0.0 ? 1.0 : 1.0 - uv.y));   // the top is the rim: open while pouring out
+  v.y *= smoothstep(0.0, uWall, v.y < 0.0 ? uv.y : mix(1.0 - uv.y, 1.0, uRim));   // the top is the rim: it opens as far as the glass is tipped
   return v;
 }
 `;
@@ -846,9 +846,9 @@ function step(dt, time) {
   f1(p, 'uDt', dt); f1(p, 'uDiss', sim.velDiss); f2(p, 'uVS', 1 / ar, 1); i1(p, 'uBlastN', 0); f1(p, 'uWall', 0); f1(p, 'uDrain', 0); blit(vel.write); vel.swap();
   // dye: MacCormack (forward pass, then corrected pass)
   p = P.advect.use(); f2(p, 'uTexel', dye.tx, dye.ty); tex(p, 'uVel', 0, vel.read); tex(p, 'uSrc', 1, dye.read);
-  f1(p, 'uDt', dt); f1(p, 'uDiss', 0); f2(p, 'uVS', 1 / ar, 1); f1(p, 'uWall', sim.wall); f1(p, 'uDrain', sim.drain); f2(p, 'uPour', sim.pourX, sim.pourY); setBlast(p, nb, ar); blit(dyeHat);
+  f1(p, 'uDt', dt); f1(p, 'uDiss', 0); f2(p, 'uVS', 1 / ar, 1); f1(p, 'uWall', sim.wall); f1(p, 'uDrain', sim.drain); f1(p, 'uRim', sim.rim); f2(p, 'uPour', sim.pourX, sim.pourY); setBlast(p, nb, ar); blit(dyeHat);
   p = P.mac.use(); f2(p, 'uTexel', dye.tx, dye.ty); tex(p, 'uVel', 0, vel.read); tex(p, 'uSrc', 1, dye.read); tex(p, 'uHat', 2, dyeHat);
-  f1(p, 'uDt', dt); f1(p, 'uDiss', sim.dyeDiss); f2(p, 'uVS', 1 / ar, 1); f2(p, 'uSize', dye.w, dye.h); f4(p, 'uMax', 14, 14, 14, 6); f3(p, 'uSat', sim.sat, sim.satK, sim.milk); f1(p, 'uWall', sim.wall); f1(p, 'uDrain', sim.drain); f2(p, 'uPour', sim.pourX, sim.pourY); setBlast(p, nb, ar);
+  f1(p, 'uDt', dt); f1(p, 'uDiss', sim.dyeDiss); f2(p, 'uVS', 1 / ar, 1); f2(p, 'uSize', dye.w, dye.h); f4(p, 'uMax', 14, 14, 14, 6); f3(p, 'uSat', sim.sat, sim.satK, sim.milk); f1(p, 'uWall', sim.wall); f1(p, 'uDrain', sim.drain); f1(p, 'uRim', sim.rim); f2(p, 'uPour', sim.pourX, sim.pourY); setBlast(p, nb, ar);
   blit(dye.write); dye.swap();
   if (pstate && RP.part > 0.01) {
     p = P.pupdate.use(); tex(p, 'uState', 0, pstate.read); tex(p, 'uVel', 1, vel.read);
@@ -1439,6 +1439,7 @@ async function renderAudio(dur, raw) {
 let autopilot = true, paused = false, simT = 4.0, lastCueT = 4.0, colorIdx = 0;
 const freeRng = mulberry32(Date.now() & 0xffff);
 const pointers = new Map();
+let inputT = 0;                   // the gesture clock: it runs with the frames (wall time live, exact steps in the test)
 function toUv(e) { const r = canvas.getBoundingClientRect(); return toSim((e.clientX - r.left) / r.width, 1 - (e.clientY - r.top) / r.height); }
 function wake() {
   document.body.classList.remove('idle');
@@ -1482,14 +1483,15 @@ function pourStep(s, dt) {        // a pipette held still keeps dripping
     if (audio && soundOn) audio.bubble(audio.ctx.currentTime + 0.005, mtof(glassMidi() - 19) * (0.8 + 0.45 * freeRng()), 0.35 + 0.35 * freeRng(), clamp(s.x * 2 - 1, -1, 1));
   }
 }
+let glassNotes = null, glassNotesPal = -1;
 function glassMidi() {            // a glass sings lower the fuller it is: empty it rings at the top of the palette's scale
-  const sc = PAL[targetPal].scale, notes = sc.map(m => m - 12).concat(sc);
-  return notes[Math.round((1 - clamp(Level.fill / 0.6, 0, 1)) * (notes.length - 1))];
+  if (glassNotesPal !== targetPal) { const sc = PAL[targetPal].scale; glassNotes = sc.map(m => m - 12).concat(sc); glassNotesPal = targetPal; }
+  return glassNotes[Math.round((1 - clamp(Level.fill / 0.6, 0, 1)) * (glassNotes.length - 1))];
 }
 
 /* ---------- pouring the glass out: the top edge is the rim ----------
    Tip the phone past it in hold mode, or swipe two fingers up (key X), and the liquid runs out over the top. */
-const Out = { t: 0, dur: 3.0, open: 0, openT: -9, glugT: 0 };
+const Out = { t: 0, dur: 3.0, open: 0, openT: -9, glugT: 0, wasOpen: false };
 function pourOut() {
   if (autopilot || Out.t > 0) return;
   Out.t = Out.dur; Out.glugT = 0; Out.openT = simT;
@@ -1509,7 +1511,7 @@ function outUpdate(dt, t) {
   }
   else sim.dyeDiss += 0.5 * open;                                      // held upside down, the film left on the glass runs off too
   Out.open = open; if (open > 0.3) Out.openT = t;
-  sim.drain = 8 * open; sim.presK = lerp(sim.presK, 0.8, open);        // an open rim no longer holds the liquid up
+  sim.rim = open; sim.drain = 8 * open; sim.presK = lerp(sim.presK, 0.8, open);   // an open rim no longer holds the liquid up
   sim.pourX = 0.55 * open * dir[0]; sim.pourY = 0.55 * open * dir[1];
 }
 
@@ -1546,8 +1548,10 @@ function glassSound(dt, t) {
     Haptics.play([22], 70 + 90 * k);
     if (audio && soundOn) audio.glug(audio.ctx.currentTime + 0.01, mtof(glassMidi() - 24) * (0.9 + 0.2 * freeRng()), 0.5 + 0.5 * k, (freeRng() - 0.5) * 0.6);
   }
-  // the moment the last of it has left, the empty glass rings bright (a half-hearted tip does not count)
-  if (Out.open > 0.3 && !Level.armed && Level.fill > 0.02) { Level.armed = true; Level.fill0 = Level.fill; }
+  // the moment the last of it has left, the empty glass rings bright, once per pour (a half-hearted tip does not count)
+  const opening = Out.open > 0.3 && !Out.wasOpen;
+  if (Out.open > 0.3) Out.wasOpen = true; else if (Out.open < 0.1) Out.wasOpen = false;
+  if (opening && Level.fill > 0.02) { Level.armed = true; Level.fill0 = Level.fill; }
   if (Level.armed && t - Out.openT > 2.5) Level.armed = false;
   if (Level.armed && Level.fill < Math.max(0.012, 0.2 * Level.fill0)) {
     Level.armed = false; Haptics.play([30], 150);
@@ -1563,7 +1567,7 @@ canvas.addEventListener('pointerdown', e => {
   wake(); if (!autopilot) askMotionOnce();
   try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
   const p = toUv(e);
-  pointers.set(e.pointerId, { x: p[0], y: p[1], px: p[0], py: p[1], t0: performance.now(), cx: e.clientX, cy: e.clientY, moved: 0, ci: colorIdx++, bellT: 0, hapT: 0, pour: false, dripT: 0, dripH: 0, col: null, y0: p[1] });
+  pointers.set(e.pointerId, { x: p[0], y: p[1], px: p[0], py: p[1], t0: inputT, cx: e.clientX, cy: e.clientY, moved: 0, ci: colorIdx++, bellT: 0, hapT: 0, pour: false, dripT: 0, dripH: 0, col: null, y0: p[1] });
 });
 canvas.addEventListener('pointermove', e => {
   wake();
@@ -1573,8 +1577,8 @@ canvas.addEventListener('pointermove', e => {
 });
 function endPointer(e) {
   const s = pointers.get(e.pointerId); if (!s) return;
-  const held = performance.now() - s.t0;
-  if (autopilot) { if (s.moved < 8 && held < 320) userBurst(s.x, s.y, false); }
+  const held = inputT - s.t0;
+  if (autopilot) { if (s.moved < 8 && held < 0.32) userBurst(s.x, s.y, false); }
   else { askMotionOnce(); if (!s.pour && s.moved < 10) dropAt(s.x, s.y); }   // released before the pour began: a single drop
   pointers.delete(e.pointerId);
 }
@@ -1586,13 +1590,13 @@ function applyPointers(dt, t) {
   let speedSum = 0, lead = null;
   const ar = AR();
   if (!autopilot && pointers.size >= 2 && Out.t <= 0) {          // two fingers swiped up together: pour the glass out
-    let up = true; const now = performance.now();
-    pointers.forEach(s => { if (s.y - s.y0 < 0.16 || now - s.t0 > 900) up = false; });
-    if (up) { pointers.forEach(s => { s.y0 = 9; }); pourOut(); }
+    let up = true;
+    pointers.forEach(s => { if (s.y - s.y0 < 0.16 || inputT - s.t0 > 0.9) up = false; });
+    if (up) { pointers.forEach(s => { s.y0 = 9; s.pour = false; }); pourOut(); }
   }
   pointers.forEach(s => {
     const dx = s.x - s.px, dy = s.y - s.py, dist = Math.hypot(dx * ar, dy);
-    if (!autopilot && !s.pour && s.moved < 10 && performance.now() - s.t0 > 300) { s.pour = true; s.col = nextDropColor(); }
+    if (!autopilot && !s.pour && s.moved < 10 && inputT - s.t0 > 0.3) { s.pour = true; s.col = nextDropColor(); }
     if (s.pour) pourStep(s, dt);
     if (dist > 1e-5 && (autopilot || !Hold.on)) {              // in hold mode only the tilt moves the liquid
       const k = 0.55 / Math.max(dt, 1 / 240);
@@ -1645,7 +1649,7 @@ function jumpChapter(i) {
   const ch = CHAPTERS[i];
   JETS.length = 0; BLASTS.length = 0;
   if (!autopilot) {
-    setPal(ch.pal, 0.45); D.clearUntil = simT + 0.35; Hold.pourAt = simT + 0.4; Out.t = 0;   // a fresh glass, not poured out again
+    setPal(ch.pal, 0.45); D.clearUntil = simT + 0.35; Hold.pourAt = simT + 0.4; Out.t = 0; Level.armed = false;   // a fresh glass, not poured out or rung again
     flash(0.5, 0.5, 0.35, mixc(PAL[ch.pal].colors[0], [1, 1, 1], 0.5)); Haptics.play(HAPTIC.jump());
     if (audio && soundOn) syncScore(simT);
     updateHud(true); return;
@@ -1806,7 +1810,7 @@ async function enterHold() {
   } catch (_) {}
   Object.assign(Hold, { on: true, got: false, g: [0, -1], lin: [0, 0], spin: 0, lp: null, shakeT: 0.8, tiltRate: 0, gPrev: [0, -1], sim: [0, -0.85], hapT: 0, peak: 0 });
   if (autopilot) setAutopilot(false, true);
-  pointers.clear(); JETS.length = 0; BLASTS.length = 0;
+  pointers.clear(); JETS.length = 0; BLASTS.length = 0; Out.t = 0; Level.armed = false;
   D.clearUntil = simT + 0.35; Hold.pourAt = simT + 0.4;      // empty the glass, then pour fresh colour
   document.body.classList.add('hold'); bHold.setAttribute('aria-pressed', 'true'); levelEl.hidden = false;
   hintEl.innerHTML = HINT_HOLD;
@@ -1937,6 +1941,19 @@ async function fontsReady() {
   } catch (_) {}
 }
 
+// one live step: the frame loop runs it, and test/glass.mjs steps it by hand at exactly 1/60 s
+function tick(dt, raw) {
+  inputT += raw;
+  if (paused) return;
+  if (autopilot) {
+    dirUpdate(simT, dt);
+    const nt = simT + dt;
+    liveCues(lastCueT, nt); liveHaptics(lastCueT, nt); lastCueT = nt; simT = nt;
+    if (simT >= T_TOTAL) { simT = 0; lastCueT = 0; dirSeek(0); D.rng = mulberry32((Math.random() * 1e9) | 0); if (audio && soundOn) syncScore(0); }
+  } else { freeUpdate(dt, simT); simT += dt; }
+  fxUpdate(simT, dt); updateRP(dt); applyPointers(dt, simT); step(dt, simT);
+}
+
 async function bootLive() {
   fitCanvas(); build();
   // pre-roll so the first frame already shows the spiral
@@ -1953,15 +1970,7 @@ async function bootLive() {
     if (gated) { if (fitCanvas()) { build(); stillDirty = true; } if (stillDirty) { render(simT); stillDirty = false; } return; }
     fpsAvg = lerp(fpsAvg, 1 / Math.max(raw, 1e-3), 0.05);
     if (fitCanvas()) build();
-    if (!paused) {
-      if (autopilot) {
-        dirUpdate(simT, dt);
-        const nt = simT + dt;
-        liveCues(lastCueT, nt); liveHaptics(lastCueT, nt); lastCueT = nt; simT = nt;
-        if (simT >= T_TOTAL) { simT = 0; lastCueT = 0; dirSeek(0); D.rng = mulberry32((Math.random() * 1e9) | 0); if (audio && soundOn) syncScore(0); }
-      } else { freeUpdate(dt, simT); simT += dt; }
-      fxUpdate(simT, dt); updateRP(dt); applyPointers(dt, simT); step(dt, simT);
-    }
+    tick(dt, raw);
     render(simT);
     if ((hudT += raw) > 0.1) { hudT = 0; updateHud(false); }
     // adaptive quality: step down if the device struggles

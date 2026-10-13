@@ -168,16 +168,19 @@ geheimer Schlüssel nötig.
 ## Tests
 
 ```bash
-node test/glass.mjs                     # 21 Prüfungen, Exit-Code 1 bei einem Fehler
+node test/glass.mjs                     # 28 Prüfungen, Exit-Code 1 bei einem Fehler
 node test/glass.mjs --stills=out/test   # zusätzlich Standbilder der Szenarien
 ```
 
-Der Test steuert die Seite in headless Chromium, parkt die Echtzeit-Schleife und rechnet die Simulation
-von Hand mit echten 60 fps – so gelten die Prüfungen auch ohne Grafikkarte. Geprüft wird: Die Demo ist
+Der Test steuert die Seite in headless Chromium, parkt die Echtzeit-Schleife und ruft die Schritt-Funktion
+der Seite (`tick`) von Hand mit exakt 1/60 s auf. Gesten laufen auf derselben Frame-Uhr, und der Zufall ist
+fest gesetzt – jeder Lauf rechnet also dasselbe, auch ohne Grafikkarte. Geprüft wird: Die Demo ist
 unverändert (Tippen = Explosion, Ziehen malt), im Glas setzt Tippen Tropfen, langes Drücken gießt, Ziehen
 rührt ohne neue Farbe, die Flüssigkeit bleibt im Glas, Schütteln zündet, und Ausgießen klappt per
-Zwei-Finger-Wisch, Taste `X` und über Kopf im Halte-Modus – inklusive Gluckern und Glaston. Dazu darf die
-Konsole keinen einzigen Fehler melden.
+Zwei-Finger-Wisch, Taste `X` und über Kopf im Halte-Modus – mit Gluckern und genau einem Glaston. Dazu die
+Randfälle: Finger, die schon gießen, hören beim Wisch auf; eine neue Palette oder der Halte-Modus mitten im
+Ausgießen gibt ein frisches Glas ohne Glaston; ein leichtes Kippen öffnet den Rand nur ein bisschen. Am Ende
+dürfen weder Konsole noch WebGL einen Fehler melden.
 
 ## Video neu rendern
 
