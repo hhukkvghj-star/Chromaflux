@@ -148,6 +148,23 @@ check('hold: upside down the glass empties', h1 < 0.05 * h0, `mass ${h0} → ${h
 check('hold: it glugs, and the empty glass rings exactly once', c.glug >= 3 && c.ping === 1, j(c));
 await X(`Hold.sim[0] = 0; Hold.sim[1] = -0.85; exitHold(); 0`); await run(10);
 
+// ---- a calm glass: ten seconds after an explosion the empty parts are black again and do not flicker
+await X(`jumpChapter(0); Hold.pourAt = -1; 0`); await run(60);         // an empty glass, no refill
+await X(`[[0.25, 0.3], [0.45, 0.7], [0.7, 0.35], [0.8, 0.65], [0.35, 0.5]].forEach(([x, y], i) => dsplat(x, y, palColors()[i % palColors().length], 1.5, 0.026)); userBurst(0.5, 0.5, true); 0`);
+await run(600);
+const calm = await X(`(() => {
+  const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight, A = new Uint8Array(W * H * 4), B = new Uint8Array(W * H * 4);
+  render(simT); gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, A);
+  tick(1 / 60, 1 / 60); render(simT); gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, B);
+  const L = (p, i) => 0.3 * p[i] + 0.59 * p[i + 1] + 0.11 * p[i + 2];
+  let black = 0, dark = 0, dif = 0;
+  for (let i = 0; i < A.length; i += 4) { const la = L(A, i); if (la < 8) black++; if (la < 40) { dark++; dif += Math.abs(la - L(B, i)); } }
+  return { black: black / (W * H), flicker: dif / dark };
+})()`);
+await snap('4-calm-glass');
+check('calm glass: the empty parts are black again', calm.black > 0.6, `black ${(100 * calm.black).toFixed(0)}%, 1.0.4 had 47%`);
+check('calm glass: the dark parts do not flicker', calm.flicker < 2.0, `flicker ${calm.flicker.toFixed(2)}, 1.0.4 had 2.84`);
+
 // ---- back to the demo
 await X(`setAutopilot(true); 0`); await run(10); await counts();
 await tap(0.5, 0.5); await run(2); c = await counts();

@@ -54,7 +54,8 @@ und die Farbe bringst du selbst hinein:
   macht „Blubb" und lässt das Glas in der Höhe seines Füllstands anklingen, Gießen gluckert, und Rühren
   klingt wie ein nasser Finger am Rand eines Weinglases.
 - Die Flüssigkeit bleibt im Glas und verblasst nur langsam. Milchig verrührte Stellen klären sich
-  zuerst, damit das Glas nicht zu Weißbrei wird.
+  zuerst, damit das Glas nicht zu Weißbrei wird, und hauchdünne Schleier lösen sich auf, damit leere
+  Stellen schwarz und ruhig bleiben. Glitzer funkelt im Glas nur, wo wirklich Flüssigkeit ist.
 - Die Kapitel-Knöpfe `1`–`5` leeren das Glas und füllen es mit der neuen Palette.
 
 Der Demo-Film (Autopilot) bleibt, wie er ist: Dort malt der Finger Licht, und Tippen zündet eine
@@ -168,7 +169,7 @@ geheimer Schlüssel nötig.
 ## Tests
 
 ```bash
-node test/glass.mjs                     # 28 Prüfungen, Exit-Code 1 bei einem Fehler
+node test/glass.mjs                     # 30 Prüfungen, Exit-Code 1 bei einem Fehler
 node test/glass.mjs --stills=out/test   # zusätzlich Standbilder der Szenarien
 ```
 
@@ -179,7 +180,8 @@ unverändert (Tippen = Explosion, Ziehen malt), im Glas setzt Tippen Tropfen, la
 rührt ohne neue Farbe, die Flüssigkeit bleibt im Glas, Schütteln zündet, und Ausgießen klappt per
 Zwei-Finger-Wisch, Taste `X` und über Kopf im Halte-Modus – mit Gluckern und genau einem Glaston. Dazu die
 Randfälle: Finger, die schon gießen, hören beim Wisch auf; eine neue Palette oder der Halte-Modus mitten im
-Ausgießen gibt ein frisches Glas ohne Glaston; ein leichtes Kippen öffnet den Rand nur ein bisschen. Am Ende
+Ausgießen gibt ein frisches Glas ohne Glaston; ein leichtes Kippen öffnet den Rand nur ein bisschen; zehn
+Sekunden nach einer Explosion sind leere Stellen wieder schwarz und flimmern nicht. Am Ende
 dürfen weder Konsole noch WebGL einen Fehler melden.
 
 ## Video neu rendern

@@ -192,7 +192,7 @@ const RKEYS = ['ink', 'metal', 'irid', 'spec', 'bloom', 'thr', 'rays', 'streak',
 const VKEYS = ['bgTop', 'bgBot', 'accent'];
 PAL.forEach(p => { p.colors = p.hex.map(lin); VKEYS.forEach(k => { p.r[k] = lin(p.r[k]); }); });
 
-const SIM_BASE = { vort: 8, gx: 0, buoy: 0, shear: 0, shearW: 0.07, shearRate: 1.0, swirl: 0, velDiss: 0.35, dyeDiss: 0.3, maxV: 3.0, noise: 0.06, noiseS: 1.6, sat: 0, satK: 1.5, milk: 0, wall: 0, presK: 0.8, drain: 0, rim: 0, pourX: 0, pourY: 0 };
+const SIM_BASE = { vort: 8, gx: 0, buoy: 0, shear: 0, shearW: 0.07, shearRate: 1.0, swirl: 0, velDiss: 0.35, dyeDiss: 0.3, maxV: 3.0, noise: 0.06, noiseS: 1.6, sat: 0, satK: 1.5, milk: 0, thin: 0, thinA: 0.15, partA: 0.04, grainK: 1, wall: 0, presK: 0.8, drain: 0, rim: 0, pourX: 0, pourY: 0 };
 const sim = Object.assign({}, SIM_BASE);
 const RP = {};
 let targetPal = 0, palTau = 0.6;
@@ -391,7 +391,7 @@ void main(){
 
 FS.mac = HDR + NB + `
 uniform sampler2D uVel; uniform sampler2D uSrc; uniform sampler2D uHat;
-uniform float uDt, uDiss; uniform vec2 uVS; uniform vec2 uSize; uniform vec4 uMax; uniform vec3 uSat;` + BL + WL + `
+uniform float uDt, uDiss; uniform vec2 uVS; uniform vec2 uSize; uniform vec4 uMax; uniform vec3 uSat; uniform vec2 uThin;` + BL + WL + `
 void main(){
   vec2 v = wallv(vUv, texture(uVel, vUv).xy + blast(vUv)) * uVS * uDt;
   vec2 back = vUv - v;
@@ -409,7 +409,8 @@ void main(){
   // a glass never silts up: dense colour above the knee settles back, and milky (desaturated) mixes clear first
   float hi = max(max(r.r, r.g), r.b), lo = min(min(r.r, r.g), r.b);
   float extra = uSat.x * max(hi - uSat.y, 0.0) + uSat.z * smoothstep(0.35, 0.8, lo / max(hi, 1e-4)) * smoothstep(0.02, 0.2, hi)
-              + uDrain * smoothstep(0.86, 1.0, vUv.y);                                   // liquid reaching an open rim leaves the glass
+              + uDrain * smoothstep(0.86, 1.0, vUv.y)                                    // liquid reaching an open rim leaves the glass
+              + uThin.x * (1.0 - smoothstep(0.25 * uThin.y, uThin.y, r.a));               // a faint haze dissolves, so empty glass stays black
   o = min(r / (1.0 + (uDiss + extra) * uDt), uMax);
 }`;
 
@@ -434,7 +435,7 @@ void main(){
 
 const VS_PDRAW = HDR + `
 uniform sampler2D uState; uniform sampler2D uDye;
-uniform vec3 uCam; uniform float uSize, uTime, uI;
+uniform vec3 uCam; uniform float uSize, uTime, uI, uPartA;
 out vec3 vC;
 void main(){
   ivec2 sz = textureSize(uState, 0);
@@ -446,7 +447,7 @@ void main(){
   vec3 hue = c / max(max(c.r, max(c.g, c.b)), 1e-3);
   float tw = pow(0.5 + 0.5 * sin(uTime * (1.5 + 5.0 * s.w) + s.w * 91.0), 10.0);
   float life = sin(3.14159 * clamp(s.z, 0.0, 1.0));
-  float m = smoothstep(0.04, 0.6, a);
+  float m = smoothstep(uPartA, 0.6, a);          // glitter only where there is enough liquid to carry it
   vC = mix(hue, vec3(1.0), 0.5) * (0.16 + 3.0 * tw) * life * m * uI;
   vec2 sp = (s.xy - 0.5 - uCam.yz) * uCam.x + 0.5;
   gl_Position = vec4(sp * 2.0 - 1.0, 0.0, 1.0);
@@ -848,7 +849,7 @@ function step(dt, time) {
   p = P.advect.use(); f2(p, 'uTexel', dye.tx, dye.ty); tex(p, 'uVel', 0, vel.read); tex(p, 'uSrc', 1, dye.read);
   f1(p, 'uDt', dt); f1(p, 'uDiss', 0); f2(p, 'uVS', 1 / ar, 1); f1(p, 'uWall', sim.wall); f1(p, 'uDrain', sim.drain); f1(p, 'uRim', sim.rim); f2(p, 'uPour', sim.pourX, sim.pourY); setBlast(p, nb, ar); blit(dyeHat);
   p = P.mac.use(); f2(p, 'uTexel', dye.tx, dye.ty); tex(p, 'uVel', 0, vel.read); tex(p, 'uSrc', 1, dye.read); tex(p, 'uHat', 2, dyeHat);
-  f1(p, 'uDt', dt); f1(p, 'uDiss', sim.dyeDiss); f2(p, 'uVS', 1 / ar, 1); f2(p, 'uSize', dye.w, dye.h); f4(p, 'uMax', 14, 14, 14, 6); f3(p, 'uSat', sim.sat, sim.satK, sim.milk); f1(p, 'uWall', sim.wall); f1(p, 'uDrain', sim.drain); f1(p, 'uRim', sim.rim); f2(p, 'uPour', sim.pourX, sim.pourY); setBlast(p, nb, ar);
+  f1(p, 'uDt', dt); f1(p, 'uDiss', sim.dyeDiss); f2(p, 'uVS', 1 / ar, 1); f2(p, 'uSize', dye.w, dye.h); f4(p, 'uMax', 14, 14, 14, 6); f3(p, 'uSat', sim.sat, sim.satK, sim.milk); f2(p, 'uThin', sim.thin, sim.thinA); f1(p, 'uWall', sim.wall); f1(p, 'uDrain', sim.drain); f1(p, 'uRim', sim.rim); f2(p, 'uPour', sim.pourX, sim.pourY); setBlast(p, nb, ar);
   blit(dye.write); dye.swap();
   if (pstate && RP.part > 0.01) {
     p = P.pupdate.use(); tex(p, 'uState', 0, pstate.read); tex(p, 'uVel', 1, vel.read);
@@ -885,7 +886,7 @@ function render(t) {
   if (pstate && RP.part > 0.01) {
     gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
     p = P.pdraw.use(); tex(p, 'uState', 0, pstate.read); tex(p, 'uDye', 1, dye.read);
-    f3(p, 'uCam', FX.zoom, FX.ox, FX.oy); f1(p, 'uSize', 1.6 * H / 1080); f1(p, 'uTime', t); f1(p, 'uI', RP.part * (1 - RP.ink) * (1 + FX.flash));
+    f3(p, 'uCam', FX.zoom, FX.ox, FX.oy); f1(p, 'uSize', 1.6 * H / 1080); f1(p, 'uTime', t); f1(p, 'uI', RP.part * (1 - RP.ink) * (1 + FX.flash)); f1(p, 'uPartA', sim.partA);
     gl.bindFramebuffer(gl.FRAMEBUFFER, hdr.fbo); gl.viewport(0, 0, hdr.w, hdr.h);
     gl.drawArrays(gl.POINTS, 0, pcount);
     gl.disable(gl.BLEND);
@@ -910,7 +911,7 @@ function render(t) {
   tex(p, 'uHdr', 0, hdr); tex(p, 'uBloom', 1, bloom[0]); tex(p, 'uRays', 2, rays); tex(p, 'uStreak', 3, streakB);
   gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, titleTex); i1(p, 'uTitle', 4);
   f1(p, 'uBloomI', RP.bloom * 0.22 * (1 + flash * 1.2)); f1(p, 'uRaysI', raysAmt * (1 - RP.ink)); f1(p, 'uStreakI', strAmt * 0.6 * (1 - RP.ink));
-  f1(p, 'uExpo', RP.expo); f1(p, 'uFlash', flash); f1(p, 'uCA', RP.ca * (1 + flash * 2.5)); f1(p, 'uGrain', RP.grain);
+  f1(p, 'uExpo', RP.expo); f1(p, 'uFlash', flash); f1(p, 'uCA', RP.ca * (1 + flash * 2.5)); f1(p, 'uGrain', RP.grain * sim.grainK);
   f1(p, 'uFade', FX.fade); f1(p, 'uInk', RP.ink); f1(p, 'uTitleA', FX.title); f1(p, 'uTime', t); f1(p, 'uVig', RP.vig); f1(p, 'uAspect', ar);
   f3(p, 'uStreakTint', ...RP.accent); f3(p, 'uFlashTint', ...FX.tint); f2(p, 'uFlashXY', sc[0], sc[1]); f2(p, 'uRes', W, H);
   blit(null);
@@ -1634,6 +1635,8 @@ function freeUpdate(dt, t) {
   Object.assign(sim, SIM_BASE, PAL[targetPal].sim);
   sim.dyeDiss = 0.045; sim.velDiss = Math.max(sim.velDiss, 0.45);   // a glass: the liquid stays until you change it
   sim.sat = 0.5; sim.milk = 0.45;                                     // …but never boils over or silts up into milk
+  sim.thin = 0.8; sim.thinA = 0.08;                                  // …and the faintest haze between the colours clears to black
+  sim.partA = 0.2; sim.grainK = 0.4;                                  // a calm glass: no glitter in the haze, finer film grain
   sim.wall = 0.05; sim.presK = 0.995;                                 // what sinks pools on the bottom, held up by remembered pressure
   updateJets(dt);
   FX.white = 0; FX.title = 0; FX.fade = 1;
